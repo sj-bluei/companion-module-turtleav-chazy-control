@@ -22,6 +22,16 @@ export interface ChazyClientOptions {
 	commandTimeout?: number
 	/** Silence after the first reply line that ends a block, in ms. */
 	blockIdleTimeout?: number
+	/**
+	 * How long to wait for the TCP connection to be accepted, in ms.
+	 *
+	 * Without this the attempt runs until the operating system gives up, which
+	 * is 75 seconds on macOS when the address simply swallows the packets — long
+	 * enough that a mistyped address looks like a hang rather than a mistake.
+	 */
+	connectTimeout?: number
+	/** How long to wait before retrying a failed connection, in ms. */
+	reconnectInterval?: number
 }
 
 export interface ChazyClientEvents {
@@ -85,11 +95,16 @@ export class ChazyClient extends EventEmitter<ChazyClientEvents> {
 	#receiveBuffer = ''
 	#destroyed = false
 
+	#connectTimer: NodeJS.Timeout | undefined
+	#retryTimer: NodeJS.Timeout | undefined
+
 	constructor(options: ChazyClientOptions) {
 		super()
 		this.#options = {
 			commandTimeout: 5000,
 			blockIdleTimeout: 500,
+			connectTimeout: 5000,
+			reconnectInterval: 5000,
 			...options,
 		}
 	}
@@ -100,31 +115,51 @@ export class ChazyClient extends EventEmitter<ChazyClientEvents> {
 
 	connect(): void {
 		if (this.#destroyed) return
+
+		this.#clearRetryTimer()
 		this.#teardownSocket()
 
-		const socket = new TelnetHelper(this.#options.host, this.#options.port, {
-			reconnect: true,
-			reconnect_interval: 5000,
-		})
+		const { host, port, connectTimeout } = this.#options
+		this.emit('status', InstanceStatus.Connecting, `Connecting to ${host}:${port}`)
+
+		// Reconnection is handled here rather than by the helper, so that a
+		// connection attempt can be abandoned on our own schedule instead of
+		// waiting out the operating system's TCP timeout.
+		const socket = new TelnetHelper(host, port, { reconnect: false })
 		this.#socket = socket
 
+		this.#connectTimer = setTimeout(() => {
+			this.#connectTimer = undefined
+			this.#teardownSocket()
+			this.#failAll(new Error('Connection timed out'))
+			this.emit(
+				'status',
+				InstanceStatus.ConnectionFailure,
+				`No response from ${host}:${port} after ${Math.round(connectTimeout / 1000)}s`,
+			)
+			this.#scheduleRetry()
+		}, connectTimeout)
+
 		socket.on('connect', () => {
+			this.#clearConnectTimer()
 			this.#receiveBuffer = ''
 			this.emit('connect')
 		})
 
 		socket.on('end', () => {
+			this.#clearConnectTimer()
 			this.#failAll(new Error('Connection closed'))
 			this.emit('disconnect')
+			this.emit('status', InstanceStatus.Disconnected, `${host}:${port} closed the connection`)
+			this.#scheduleRetry()
 		})
 
 		socket.on('error', (error: Error) => {
+			this.#clearConnectTimer()
 			this.#failAll(error)
 			this.emit('error', error)
-		})
-
-		socket.on('status_change', (status, message) => {
-			this.emit('status', status, message ?? undefined)
+			this.emit('status', InstanceStatus.ConnectionFailure, `${host}:${port}: ${error.message}`)
+			this.#scheduleRetry()
 		})
 
 		socket.on('data', (chunk: Buffer) => {
@@ -134,9 +169,29 @@ export class ChazyClient extends EventEmitter<ChazyClientEvents> {
 
 	destroy(): void {
 		this.#destroyed = true
+		this.#clearConnectTimer()
+		this.#clearRetryTimer()
 		this.#failAll(new Error('Module is shutting down'))
 		this.#teardownSocket()
 		this.removeAllListeners()
+	}
+
+	#scheduleRetry(): void {
+		if (this.#destroyed || this.#retryTimer) return
+		this.#retryTimer = setTimeout(() => {
+			this.#retryTimer = undefined
+			this.connect()
+		}, this.#options.reconnectInterval)
+	}
+
+	#clearConnectTimer(): void {
+		if (this.#connectTimer) clearTimeout(this.#connectTimer)
+		this.#connectTimer = undefined
+	}
+
+	#clearRetryTimer(): void {
+		if (this.#retryTimer) clearTimeout(this.#retryTimer)
+		this.#retryTimer = undefined
 	}
 
 	/**

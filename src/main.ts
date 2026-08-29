@@ -112,12 +112,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		})
 
 		client.on('status', (status, message) => {
-			// Do not let a transient socket status overwrite a good sync.
-			if (status === InstanceStatus.Ok && !this.#everSynced) {
-				this.updateStatus(InstanceStatus.Connecting, 'Waiting for status')
-			} else if (status !== InstanceStatus.Ok) {
-				this.updateStatus(status, message)
-			}
+			// The client reports transport state; Ok is only claimed once a
+			// status block has actually been parsed, in #onSynced.
+			if (status === InstanceStatus.Ok) return
+			this.updateStatus(status, message)
 		})
 
 		client.on('error', (error) => {

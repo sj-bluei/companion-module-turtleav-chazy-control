@@ -82,7 +82,11 @@ Presets are generated from the devices the controller reports, so they appear on
 
 ## Troubleshooting
 
-**Status stays on "Connecting" / "Waiting for status"** — the socket opened but no status block could be read. Check that telnet (not just SSH or HTTPS) is enabled on the unit, and that nothing else holds the session.
+**"Connection failure — No response from …"** — nothing accepted a connection within 5 seconds. Usually a wrong address, the wrong port, or a device on another VLAN. The module keeps retrying every 5 seconds, so fixing the address is enough; there is no need to disable and re-enable the connection.
+
+**"Connection failure — … ECONNREFUSED"** — the address is reachable but nothing is listening on that port. Check the port, and that telnet is enabled on the unit rather than only SSH or HTTPS.
+
+**Status stays on "Connecting" / "Waiting for status"** — the socket opened but no status block came back. Check that nothing else is holding the telnet session, and turn on _Log all device traffic_ to see what the unit is actually sending.
 
 **Feedbacks and variables never update** — check the poll interval is not `0`.
 

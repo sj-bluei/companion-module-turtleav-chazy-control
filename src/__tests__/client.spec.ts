@@ -1,6 +1,8 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
+import { InstanceStatus } from '@companion-module/base'
+
 import { ChazyClient } from '../chazy.js'
 import { Commands } from '../commands.js'
 import { parseDecoderStatus, parseSystemStatus } from '../parser.js'
@@ -166,6 +168,92 @@ describe('ChazyClient against a device that emits a prompt', () => {
 		const lines = await client.send(Commands.getDecoderStatus(0), 'block')
 		const parsed = parseDecoderStatus(lines.join('\n'))
 		assert.equal(parsed.decoders.length, 2)
+	})
+})
+
+describe('ChazyClient connection failures', () => {
+	it('gives up on an unreachable address instead of waiting for the OS', async () => {
+		// 192.0.2.1 is TEST-NET-1: packets are black-holed, so the OS would
+		// otherwise take 75s on macOS to report ETIMEDOUT.
+		const client = new ChazyClient({
+			host: '192.0.2.1',
+			port: 23,
+			connectTimeout: 700,
+			reconnectInterval: 60_000,
+		})
+		client.on('error', () => {
+			/* expected */
+		})
+
+		const started = Date.now()
+		const status = await new Promise<{ status: InstanceStatus; message: string | undefined }>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error('No failure status was reported')), 5000)
+			client.on('status', (value, message) => {
+				if (value === InstanceStatus.ConnectionFailure) {
+					clearTimeout(timer)
+					resolve({ status: value, message })
+				}
+			})
+			client.connect()
+		})
+		const elapsed = Date.now() - started
+
+		assert.equal(status.status, InstanceStatus.ConnectionFailure)
+		assert.match(String(status.message), /192\.0\.2\.1:23/)
+		assert.ok(elapsed < 4000, `took ${elapsed}ms to report failure`)
+
+		client.destroy()
+	})
+
+	it('reports connection refused promptly', async () => {
+		// Bind and immediately close, so the port is almost certainly free.
+		const probe = new ChazySimulator()
+		const port = await probe.listen()
+		await probe.close()
+
+		const client = new ChazyClient({ host: '127.0.0.1', port, connectTimeout: 2000, reconnectInterval: 60_000 })
+		client.on('error', () => {
+			/* expected */
+		})
+
+		const message = await new Promise<string | undefined>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error('No failure status was reported')), 5000)
+			client.on('status', (value, text) => {
+				if (value === InstanceStatus.ConnectionFailure) {
+					clearTimeout(timer)
+					resolve(text)
+				}
+			})
+			client.connect()
+		})
+
+		assert.match(String(message), /ECONNREFUSED|refused/i)
+		client.destroy()
+	})
+
+	it('stops retrying once destroyed', async () => {
+		const client = new ChazyClient({
+			host: '192.0.2.1',
+			port: 23,
+			connectTimeout: 300,
+			reconnectInterval: 300,
+		})
+		client.on('error', () => {
+			/* expected */
+		})
+
+		let failures = 0
+		client.on('status', (value) => {
+			if (value === InstanceStatus.ConnectionFailure) failures++
+		})
+		client.connect()
+
+		await new Promise((resolve) => setTimeout(resolve, 800))
+		client.destroy()
+		const seen = failures
+
+		await new Promise((resolve) => setTimeout(resolve, 900))
+		assert.equal(failures, seen, 'no further attempts should happen after destroy')
 	})
 })
 
