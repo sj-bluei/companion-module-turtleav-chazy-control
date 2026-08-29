@@ -1,7 +1,8 @@
 import type { CompanionVariableDefinitions, CompanionVariableValue } from '@companion-module/base'
 
 import type ModuleInstance from './main.js'
-import { resolutionLabel, rotateDegrees, SIGNAL_TYPES } from './types.js'
+import type { ChazyState } from './state.js'
+import { resolutionLabel, rotateDegrees, SIGNAL_LABEL, SIGNAL_TYPES } from './types.js'
 
 /**
  * The per-device variables are generated from whatever the controller reports,
@@ -27,8 +28,18 @@ export function UpdateVariableDefinitions(self: ModuleInstance): void {
 		const id = String(decoder.id).padStart(3, '0')
 		definitions[`dec_${id}_name`] = { name: `Decoder ${id}: name` }
 		definitions[`dec_${id}_online`] = { name: `Decoder ${id}: online` }
+		definitions[`dec_${id}_hpd`] = { name: `Decoder ${id}: display connected` }
 		definitions[`dec_${id}_source`] = { name: `Decoder ${id}: video source ID` }
 		definitions[`dec_${id}_source_name`] = { name: `Decoder ${id}: video source name` }
+
+		for (const signal of SIGNAL_TYPES) {
+			definitions[`dec_${id}_source_${signal}`] = {
+				name: `Decoder ${id}: ${SIGNAL_LABEL[signal]} source ID`,
+			}
+			definitions[`dec_${id}_source_${signal}_name`] = {
+				name: `Decoder ${id}: ${SIGNAL_LABEL[signal]} source name`,
+			}
+		}
 		definitions[`dec_${id}_mode`] = { name: `Decoder ${id}: matrix/video wall mode` }
 		definitions[`dec_${id}_output`] = { name: `Decoder ${id}: output enabled` }
 		definitions[`dec_${id}_muted`] = { name: `Decoder ${id}: output muted` }
@@ -57,12 +68,18 @@ export function UpdateVariableValues(self: ModuleInstance): void {
 	for (const decoder of state.decoders) {
 		const id = String(decoder.id).padStart(3, '0')
 		const sourceId = decoder.selected.video
-		const source = sourceId ? state.getEncoder(sourceId) : undefined
 
 		values[`dec_${id}_name`] = decoder.name
 		values[`dec_${id}_online`] = decoder.online ? 'online' : 'offline'
+		values[`dec_${id}_hpd`] = decoder.hpd ? 'connected' : 'disconnected'
 		values[`dec_${id}_source`] = sourceId
-		values[`dec_${id}_source_name`] = sourceId === 0 ? 'None' : (source?.name ?? String(sourceId).padStart(3, '0'))
+		values[`dec_${id}_source_name`] = sourceName(state, sourceId)
+
+		for (const signal of SIGNAL_TYPES) {
+			const signalSource = decoder.selected[signal]
+			values[`dec_${id}_source_${signal}`] = signalSource
+			values[`dec_${id}_source_${signal}_name`] = sourceName(state, signalSource)
+		}
 		values[`dec_${id}_mode`] = decoder.mode
 		values[`dec_${id}_output`] = decoder.outputOn ? 'on' : 'off'
 		values[`dec_${id}_muted`] = decoder.muted ? 'muted' : 'unmuted'
@@ -78,6 +95,12 @@ export function UpdateVariableValues(self: ModuleInstance): void {
 	}
 
 	self.setVariableValues(values)
+}
+
+/** Friendly name for a source encoder, or "None" when unrouted. */
+function sourceName(state: ChazyState, id: number): string {
+	if (id === 0) return 'None'
+	return state.getEncoder(id)?.name ?? String(id).padStart(3, '0')
 }
 
 /** Variable names that a preset can reference for a given decoder. */

@@ -16,6 +16,7 @@ export type FeedbacksSchema = {
 	output_on: { type: 'boolean'; options: { dec: DeviceOption } }
 	output_muted: { type: 'boolean'; options: { dec: DeviceOption } }
 	decoder_mode_vw: { type: 'boolean'; options: { dec: DeviceOption } }
+	decoder_hpd: { type: 'boolean'; options: { dec: DeviceOption } }
 	decoder_online: { type: 'boolean'; options: { dec: DeviceOption } }
 	encoder_online: { type: 'boolean'; options: { enc: DeviceOption; requireSignal: boolean } }
 }
@@ -127,6 +128,20 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const dec = asDeviceId(feedback.options.dec)
 				if (dec === undefined) return false
 				return self.state.getDecoder(dec)?.mode === 'VW'
+			},
+		},
+
+		decoder_hpd: {
+			name: 'Decoder has a display connected (HPD)',
+			description:
+				'True when the decoder detects a display on its HDMI output. Useful for spotting a screen that is unplugged or in standby.',
+			type: 'boolean',
+			defaultStyle: { bgcolor: GREEN, color: WHITE },
+			options: [devicePicker('dec', 'Decoder (RX)', decoders)],
+			callback: (feedback) => {
+				const dec = asDeviceId(feedback.options.dec)
+				if (dec === undefined) return false
+				return self.state.getDecoder(dec)?.hpd ?? false
 			},
 		},
 

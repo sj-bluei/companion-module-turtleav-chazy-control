@@ -124,6 +124,31 @@ export function resolutionLabel(code: string): string {
 	return RESOLUTION_CHOICES.find((c) => c.id === normalised)?.label ?? code
 }
 
+/**
+ * Common CEC messages, as raw bytes for `SET DEC [dec] CEC SEND`.
+ *
+ * The addressing follows the API reference's own examples: `4` is the source
+ * logical address (playback device), `0` addresses the TV and `F` broadcasts.
+ * Displays vary in what they honour, which is why "Custom" always remains
+ * available alongside these.
+ */
+export const CEC_COMMANDS: { id: string; label: string; bytes: string }[] = [
+	{ id: 'power_on', label: 'Display on', bytes: '40 04' },
+	{ id: 'standby', label: 'Display off (standby)', bytes: '4F 36' },
+	{ id: 'volume_up', label: 'Volume up', bytes: '40 44 41' },
+	{ id: 'volume_down', label: 'Volume down', bytes: '40 44 42' },
+	{ id: 'mute', label: 'Mute toggle', bytes: '40 44 43' },
+	{ id: 'custom', label: 'Custom…', bytes: '' },
+]
+
+export const CEC_CUSTOM = 'custom'
+
+/** Bytes for a CEC choice, or undefined when the user picked Custom. */
+export function cecBytes(id: string): string | undefined {
+	if (id === CEC_CUSTOM) return undefined
+	return CEC_COMMANDS.find((command) => command.id === id)?.bytes
+}
+
 export const ROTATE_CHOICES: { id: string; label: string }[] = [
 	{ id: '0', label: '0°' },
 	{ id: '1', label: '90°' },

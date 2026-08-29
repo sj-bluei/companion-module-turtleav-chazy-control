@@ -293,7 +293,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 		if (changes.routing) this.checkFeedbacks('routed_from', 'route_locked')
 		if (changes.output) this.checkFeedbacks('output_on', 'output_muted')
-		if (changes.presence) this.checkFeedbacks('decoder_online', 'encoder_online')
+		if (changes.presence) this.checkFeedbacks('decoder_online', 'encoder_online', 'decoder_hpd')
 		if (changes.devices) this.checkFeedbacks('decoder_mode_vw')
 	}
 }

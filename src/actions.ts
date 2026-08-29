@@ -4,6 +4,8 @@ import type ModuleInstance from './main.js'
 import { Commands } from './commands.js'
 import {
 	asDeviceId,
+	asDeviceIdList,
+	parseSalvoList,
 	decoderChoices,
 	encoderChoices,
 	isSignalType,
@@ -13,7 +15,15 @@ import {
 	type DeviceOption,
 	type ToggleOption,
 } from './options.js'
-import { RESOLUTION_CHOICES, ROTATE_CHOICES, SIGNAL_LABEL, type SignalType } from './types.js'
+import {
+	CEC_COMMANDS,
+	CEC_CUSTOM,
+	cecBytes,
+	RESOLUTION_CHOICES,
+	ROTATE_CHOICES,
+	SIGNAL_LABEL,
+	type SignalType,
+} from './types.js'
 
 export type ActionsSchema = {
 	route_all: { options: { dec: DeviceOption; enc: DeviceOption } }
@@ -26,7 +36,9 @@ export type ActionsSchema = {
 	output_osd: { options: { dec: DeviceOption; state: string } }
 	decoder_mode: { options: { dec: DeviceOption; mode: string } }
 	wall_preset: { options: { wall: number; preset: number } }
-	send_cec: { options: { target: string; id: DeviceOption; hex: string } }
+	send_cec: { options: { target: string; id: DeviceOption; command: string; hex: string } }
+	route_salvo_source: { options: { enc: DeviceOption; decs: DeviceOption[]; signal: string } }
+	route_salvo_list: { options: { routes: string; signal: string } }
 	send_ir: { options: { target: string; id: DeviceOption; hex: string } }
 	encoder_audio_input: { options: { enc: DeviceOption; source: string } }
 	encoder_led: { options: { enc: DeviceOption; state: string } }
@@ -76,6 +88,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				if (dec === undefined || enc === undefined) return self.warnBadOption('route_all')
 				await self.sendCommand(Commands.routeAll(dec, enc))
 			},
+			learn: (event) => {
+				const dec = asDeviceId(event.options.dec)
+				const source = dec === undefined ? undefined : self.state.getDecoder(dec)?.selected.video
+				return source === undefined ? undefined : { enc: source }
+			},
 		},
 
 		route_signal: {
@@ -102,6 +119,13 @@ export function UpdateActions(self: ModuleInstance): void {
 				}
 				await self.sendCommand(Commands.routeSignal(dec, enc, signal))
 			},
+			learn: (event) => {
+				const dec = asDeviceId(event.options.dec)
+				const signal = event.options.signal
+				if (dec === undefined || !isSignalType(signal)) return undefined
+				const locked = self.state.getDecoder(dec)?.locked[signal]
+				return locked === undefined ? undefined : { enc: locked }
+			},
 		},
 
 		output_enable: {
@@ -116,6 +140,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				const target = self.resolveDecoderToggle(dec, event.options.state as ToggleOption, (d) => d.outputOn)
 				await self.sendCommand(Commands.outputEnable(dec, target))
 			},
+			learn: (event) => {
+				const dec = asDeviceId(event.options.dec)
+				const decoder = dec === undefined ? undefined : self.state.getDecoder(dec)
+				return decoder ? { state: decoder.outputOn ? 'on' : 'off' } : undefined
+			},
 		},
 
 		output_mute: {
@@ -129,6 +158,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				if (dec === undefined) return self.warnBadOption('output_mute')
 				const target = self.resolveDecoderToggle(dec, event.options.state as ToggleOption, (d) => d.muted)
 				await self.sendCommand(Commands.outputMute(dec, target))
+			},
+			learn: (event) => {
+				const dec = asDeviceId(event.options.dec)
+				const decoder = dec === undefined ? undefined : self.state.getDecoder(dec)
+				return decoder ? { state: decoder.muted ? 'on' : 'off' } : undefined
 			},
 		},
 
@@ -149,6 +183,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				if (dec === undefined) return self.warnBadOption('output_resolution')
 				await self.sendCommand(Commands.outputResolution(dec, String(event.options.resolution)))
 			},
+			learn: (event) => {
+				const dec = asDeviceId(event.options.dec)
+				const decoder = dec === undefined ? undefined : self.state.getDecoder(dec)
+				return decoder ? { resolution: String(parseInt(decoder.resolutionCode, 10)) } : undefined
+			},
 		},
 
 		output_rotate: {
@@ -161,6 +200,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				const dec = asDeviceId(event.options.dec)
 				if (dec === undefined) return self.warnBadOption('output_rotate')
 				await self.sendCommand(Commands.outputRotate(dec, String(event.options.rotate)))
+			},
+			learn: (event) => {
+				const dec = asDeviceId(event.options.dec)
+				const decoder = dec === undefined ? undefined : self.state.getDecoder(dec)
+				return decoder ? { rotate: String(decoder.rotateCode) } : undefined
 			},
 		},
 
@@ -230,6 +274,11 @@ export function UpdateActions(self: ModuleInstance): void {
 				if (mode !== 'MX' && mode !== 'VW') return self.warnBadOption('decoder_mode')
 				await self.sendCommand(Commands.decoderMode(dec, mode))
 			},
+			learn: (event) => {
+				const dec = asDeviceId(event.options.dec)
+				const decoder = dec === undefined ? undefined : self.state.getDecoder(dec)
+				return decoder && decoder.mode !== 'unknown' ? { mode: decoder.mode } : undefined
+			},
 		},
 
 		wall_preset: {
@@ -245,16 +294,29 @@ export function UpdateActions(self: ModuleInstance): void {
 
 		send_cec: {
 			name: 'Send: CEC command',
-			description: 'Sends raw CEC bytes out of a device, e.g. to power a display on or off.',
+			description:
+				'Sends a CEC message out of a device, most often to power a display on or off. Pick a standard command, or choose Custom to enter raw bytes.',
 			options: [
 				{ id: 'target', type: 'dropdown', label: 'Device type', choices: TARGET_CHOICES, default: 'DEC' },
 				devicePicker('id', 'Device', decodersNoAll),
+				{
+					id: 'command',
+					type: 'dropdown',
+					label: 'Command',
+					choices: CEC_COMMANDS.map((command) => ({ id: command.id, label: command.label })),
+					default: 'power_on',
+					// Required so the hex field below can reference this in isVisibleExpression.
+					disableAutoExpression: true,
+					tooltip:
+						'Standard CEC messages addressed from a playback device. Displays vary in what they honour — use Custom if yours does not respond.',
+				},
 				{
 					id: 'hex',
 					type: 'textinput',
 					label: 'CEC bytes (hex)',
 					default: '40 04',
 					useVariables: true,
+					isVisibleExpression: `$(options:command) == '${CEC_CUSTOM}'`,
 					tooltip: 'Space separated hex bytes, e.g. "40 04" to wake a display.',
 				},
 			],
@@ -262,7 +324,86 @@ export function UpdateActions(self: ModuleInstance): void {
 				const id = asDeviceId(event.options.id)
 				const target = event.options.target
 				if (id === undefined || (target !== 'DEC' && target !== 'ENC')) return self.warnBadOption('send_cec')
-				await self.sendCommand(Commands.sendCec(target, id, String(event.options.hex ?? '')))
+
+				const chosen = String(event.options.command ?? CEC_CUSTOM)
+				const bytes = cecBytes(chosen) ?? String(event.options.hex ?? '')
+				if (!bytes.trim()) return self.warnBadOption('send_cec')
+
+				await self.sendCommand(Commands.sendCec(target, id, bytes))
+			},
+		},
+
+		route_salvo_source: {
+			name: 'Route: salvo — many decoders from one encoder',
+			description: 'Switches several decoders to the same source in one press.',
+			options: [
+				devicePicker('enc', 'Encoder (TX)', encoders),
+				{
+					id: 'decs',
+					type: 'multidropdown',
+					label: 'Decoders (RX)',
+					choices: decodersNoAll,
+					default: [],
+					minChoicesForSearch: 0,
+					tooltip: 'Every decoder selected here is switched to the chosen source.',
+				},
+				{
+					id: 'signal',
+					type: 'dropdown',
+					label: 'Signal',
+					choices: [{ id: 'all', label: 'All signals' }, ...SIGNAL_CHOICES],
+					default: 'all',
+				},
+			],
+			callback: async (event) => {
+				const enc = asDeviceId(event.options.enc)
+				const decs = asDeviceIdList(event.options.decs)
+				if (enc === undefined || decs.length === 0) return self.warnBadOption('route_salvo_source')
+
+				const signal = event.options.signal
+				for (const dec of decs) {
+					const command = isSignalType(signal) ? Commands.routeSignal(dec, enc, signal) : Commands.routeAll(dec, enc)
+					await self.sendCommand(command)
+				}
+			},
+		},
+
+		route_salvo_list: {
+			name: 'Route: salvo — list of decoder:encoder pairs',
+			description:
+				'Applies an arbitrary set of routes in one press, written as decoder:encoder pairs — for example "1:13, 2:14, 3:13".',
+			options: [
+				{
+					id: 'routes',
+					type: 'textinput',
+					label: 'Routes',
+					default: '',
+					useVariables: true,
+					multiline: true,
+					tooltip: 'Separate pairs with commas, semicolons or new lines. Use encoder 0 to disconnect.',
+				},
+				{
+					id: 'signal',
+					type: 'dropdown',
+					label: 'Signal',
+					choices: [{ id: 'all', label: 'All signals' }, ...SIGNAL_CHOICES],
+					default: 'all',
+				},
+			],
+			callback: async (event) => {
+				const { routes, invalid } = parseSalvoList(String(event.options.routes ?? ''))
+				if (invalid.length > 0) {
+					self.log('warn', `Salvo skipped ${invalid.length} unreadable entr(y/ies): ${invalid.join(', ')}`)
+				}
+				if (routes.length === 0) return self.warnBadOption('route_salvo_list')
+
+				const signal = event.options.signal
+				for (const route of routes) {
+					const command = isSignalType(signal)
+						? Commands.routeSignal(route.decoder, route.encoder, signal)
+						: Commands.routeAll(route.decoder, route.encoder)
+					await self.sendCommand(command)
+				}
 			},
 		},
 

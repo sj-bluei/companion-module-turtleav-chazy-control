@@ -93,3 +93,59 @@ export function resolveToggle(mode: ToggleOption, current: boolean | undefined):
 export function isSignalType(value: unknown): value is SignalType {
 	return typeof value === 'string' && (SIGNAL_TYPES as readonly string[]).includes(value)
 }
+
+export interface SalvoRoute {
+	decoder: number
+	encoder: number
+}
+
+export interface SalvoParseResult {
+	routes: SalvoRoute[]
+	/** Entries that could not be understood, kept so the user can be told which. */
+	invalid: string[]
+}
+
+/**
+ * Parse a salvo written as `decoder:encoder` pairs, e.g. `1:13, 2:14, 3:13`.
+ *
+ * Separators are deliberately loose (commas, semicolons, newlines) because
+ * these lists get pasted from spreadsheets and run sheets. A bad entry is
+ * reported rather than aborting the salvo, so one typo cannot silently drop
+ * every other route in a show-critical button press.
+ */
+export function parseSalvoList(input: string): SalvoParseResult {
+	const result: SalvoParseResult = { routes: [], invalid: [] }
+
+	for (const rawEntry of input.split(/[,;\n\r]+/)) {
+		const entry = rawEntry.trim()
+		if (!entry) continue
+
+		const match = entry.match(/^(\d{1,3})\s*[:>=-]\s*(\d{1,3})$/)
+		if (!match) {
+			result.invalid.push(entry)
+			continue
+		}
+
+		const decoder = parseInt(match[1], 10)
+		const encoder = parseInt(match[2], 10)
+		if (!Number.isFinite(decoder) || !Number.isFinite(encoder)) {
+			result.invalid.push(entry)
+			continue
+		}
+
+		result.routes.push({ decoder, encoder })
+	}
+
+	return result
+}
+
+/** Coerce a multidropdown value into a list of device IDs. */
+export function asDeviceIdList(value: unknown): number[] {
+	if (!Array.isArray(value)) return []
+	const ids: number[] = []
+	for (const item of value) {
+		const id = asDeviceId(item as DeviceOption)
+		if (id !== undefined && !ids.includes(id)) ids.push(id)
+	}
+	return ids
+}
