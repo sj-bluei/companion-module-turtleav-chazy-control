@@ -1,0 +1,88 @@
+import type { CompanionVariableDefinitions, CompanionVariableValue } from '@companion-module/base'
+
+import type ModuleInstance from './main.js'
+import { resolutionLabel, rotateDegrees, SIGNAL_TYPES } from './types.js'
+
+/**
+ * The per-device variables are generated from whatever the controller reports,
+ * so the schema carries an index signature alongside the fixed entries.
+ */
+export type VariablesSchema = {
+	connection: string
+	fw_version: string
+	decoder_count: number
+	encoder_count: number
+	[variableId: string]: CompanionVariableValue
+}
+
+export function UpdateVariableDefinitions(self: ModuleInstance): void {
+	const definitions: CompanionVariableDefinitions<VariablesSchema> = {
+		connection: { name: 'Connection state' },
+		fw_version: { name: 'Controller firmware version' },
+		decoder_count: { name: 'Number of known decoders' },
+		encoder_count: { name: 'Number of known encoders' },
+	}
+
+	for (const decoder of self.state.decoders) {
+		const id = String(decoder.id).padStart(3, '0')
+		definitions[`dec_${id}_name`] = { name: `Decoder ${id}: name` }
+		definitions[`dec_${id}_online`] = { name: `Decoder ${id}: online` }
+		definitions[`dec_${id}_source`] = { name: `Decoder ${id}: video source ID` }
+		definitions[`dec_${id}_source_name`] = { name: `Decoder ${id}: video source name` }
+		definitions[`dec_${id}_mode`] = { name: `Decoder ${id}: matrix/video wall mode` }
+		definitions[`dec_${id}_output`] = { name: `Decoder ${id}: output enabled` }
+		definitions[`dec_${id}_muted`] = { name: `Decoder ${id}: output muted` }
+		definitions[`dec_${id}_resolution`] = { name: `Decoder ${id}: output resolution` }
+		definitions[`dec_${id}_rotate`] = { name: `Decoder ${id}: output rotation` }
+	}
+
+	for (const encoder of self.state.encoders) {
+		const id = String(encoder.id).padStart(3, '0')
+		definitions[`enc_${id}_name`] = { name: `Encoder ${id}: name` }
+		definitions[`enc_${id}_online`] = { name: `Encoder ${id}: online` }
+		definitions[`enc_${id}_signal`] = { name: `Encoder ${id}: input signal present` }
+	}
+
+	self.setVariableDefinitions(definitions)
+}
+
+export function UpdateVariableValues(self: ModuleInstance): void {
+	const state = self.state
+	const values: Record<string, CompanionVariableValue> = {
+		fw_version: state.current.firmware,
+		decoder_count: state.decoders.length,
+		encoder_count: state.encoders.length,
+	}
+
+	for (const decoder of state.decoders) {
+		const id = String(decoder.id).padStart(3, '0')
+		const sourceId = decoder.selected.video
+		const source = sourceId ? state.getEncoder(sourceId) : undefined
+
+		values[`dec_${id}_name`] = decoder.name
+		values[`dec_${id}_online`] = decoder.online ? 'online' : 'offline'
+		values[`dec_${id}_source`] = sourceId
+		values[`dec_${id}_source_name`] = sourceId === 0 ? 'None' : (source?.name ?? String(sourceId).padStart(3, '0'))
+		values[`dec_${id}_mode`] = decoder.mode
+		values[`dec_${id}_output`] = decoder.outputOn ? 'on' : 'off'
+		values[`dec_${id}_muted`] = decoder.muted ? 'muted' : 'unmuted'
+		values[`dec_${id}_resolution`] = resolutionLabel(decoder.resolutionCode)
+		values[`dec_${id}_rotate`] = `${rotateDegrees(decoder.rotateCode)}°`
+	}
+
+	for (const encoder of state.encoders) {
+		const id = String(encoder.id).padStart(3, '0')
+		values[`enc_${id}_name`] = encoder.name
+		values[`enc_${id}_online`] = encoder.online ? 'online' : 'offline'
+		values[`enc_${id}_signal`] = encoder.signal ? 'signal' : 'no signal'
+	}
+
+	self.setVariableValues(values)
+}
+
+/** Variable names that a preset can reference for a given decoder. */
+export function decoderVariable(id: number, suffix: string): string {
+	return `dec_${String(id).padStart(3, '0')}_${suffix}`
+}
+
+export { SIGNAL_TYPES }

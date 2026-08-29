@@ -1,0 +1,28 @@
+{
+	"$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
+	"type": "connection",
+	"id": "turtleav-chazy-control",
+	"name": "turtleav-chazy-control",
+	"shortname": "Chazy Control",
+	"description": "Control Turtle AV Chazy Control / Control Pro AV-over-IP management boxes",
+	"version": "0.1.0",
+	"license": "MIT",
+	"repository": "git+https://github.com/bitfocus/companion-module-turtleav-chazy-control.git",
+	"bugs": "https://github.com/bitfocus/companion-module-turtleav-chazy-control/issues",
+	"maintainers": [
+		{
+			"name": "Sam Jeffs",
+			"email": "sam.j.jeffs@gmail.com"
+		}
+	],
+	"runtime": {
+		"type": "node22",
+		"api": "nodejs-ipc",
+		"apiVersion": "0.0.0",
+		"entrypoint": "../dist/main.js"
+	},
+	"legacyIds": [],
+	"manufacturer": "Turtle AV",
+	"products": ["Chazy Control", "Chazy Control Pro"],
+	"keywords": ["AV-over-IP", "Matrix", "Dante", "Video Wall", "KVM"]
+}
