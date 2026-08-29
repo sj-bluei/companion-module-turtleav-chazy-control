@@ -1,7 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { parseDecoderStatus, parseEncoderStatus, parseSignalOrder, parseSystemStatus } from '../parser.js'
+import {
+	parseDecoderStatus,
+	parseEncoderStatus,
+	parseSignalOrder,
+	parseSystemStatus,
+	parseWallStatus,
+} from '../parser.js'
 import { stripPromptPrefix } from '../chazy.js'
 
 /**
@@ -343,5 +349,56 @@ ID    Type   Net    Sig   Ver      EDID   Aud   MCast   Name
 		assert.equal(parsed.encoders[1].signal, false)
 		assert.equal(parsed.encoders[1].audioInput, 'ANA')
 		assert.equal(parsed.encoders[1].multicast, false)
+	})
+})
+
+/** Transcribed from the API reference section 7.16. */
+const WALL_STATUS = `
+================================================================
+              CHAZY CONTROL Video Wall Info
+              FW Version: 1.00.17
+VW  Col    Row    CfgSel  Name
+01  02     02     01      VW1
+OutID
+001 002 --- ---
+Cfg    Name
+01     TEST1
+Class  From    Screen
+A      001     H01V02 H02V02
+B      001     H01V01
+Single From
+H02V01 001
+================================================================
+`
+
+describe('parseWallStatus', () => {
+	const result = parseWallStatus(WALL_STATUS)
+
+	it('reads the wall geometry and name', () => {
+		assert.ok(result)
+		assert.equal(result.id, 1)
+		assert.equal(result.columns, 2)
+		assert.equal(result.rows, 2)
+		assert.equal(result.name, 'VW1')
+	})
+
+	it('reads the active preset from CfgSel', () => {
+		assert.equal(result?.activePreset, 1)
+	})
+
+	it('reads the preset name table', () => {
+		assert.equal(result?.presetNames.get(1), 'TEST1')
+	})
+
+	it('does not mistake the OutID or Class rows for data', () => {
+		assert.deepEqual(result?.unparsed, [])
+	})
+
+	it('returns undefined for an error reply, so a missing wall is not invented', () => {
+		assert.equal(parseWallStatus('[ERROR]Video wall 05 does not exist.'), undefined)
+	})
+
+	it('returns undefined for unrelated output', () => {
+		assert.equal(parseWallStatus(''), undefined)
 	})
 })

@@ -5,7 +5,7 @@ import { InstanceStatus } from '@companion-module/base'
 
 import { ChazyClient } from '../chazy.js'
 import { Commands } from '../commands.js'
-import { parseDecoderStatus, parseSystemStatus } from '../parser.js'
+import { parseDecoderStatus, parseSystemStatus, parseWallStatus } from '../parser.js'
 import { ChazyState } from '../state.js'
 import { ChazySimulator } from './simulator.js'
 
@@ -117,6 +117,24 @@ describe('ChazyClient against a simulated device', () => {
 		const restored = new ChazyState()
 		restored.applyDecoderStatus(parseDecoderStatus(after.join('\n')))
 		assert.equal(restored.getDecoder(1)?.outputOn, true)
+	})
+
+	it('reads back the active video wall preset after applying one', async () => {
+		await client.send(Commands.applyWallPreset(1, 3), 'ack')
+
+		const state = new ChazyState()
+		const lines = await client.send(Commands.getWallStatus(1), 'block')
+		const parsed = parseWallStatus(lines.join('\n'))
+		assert.ok(parsed, 'expected a wall status block')
+		state.applyWallStatus(parsed)
+
+		assert.equal(state.getWall(1)?.activePreset, 3)
+		assert.equal(state.getWall(1)?.name, 'VW1')
+	})
+
+	it('reports an error for a wall that does not exist, so probing can skip it', async () => {
+		const lines = await client.send(Commands.getWallStatus(7), 'block')
+		assert.equal(parseWallStatus(lines.join('\n')), undefined)
 	})
 
 	it('sends the documented wire syntax', async () => {

@@ -7,7 +7,7 @@
  * variables that need it.
  */
 
-import type { ParsedDecoderStatus, ParsedEncoderStatus, ParsedSystemStatus } from './parser.js'
+import type { ParsedDecoderStatus, ParsedEncoderStatus, ParsedSystemStatus, ParsedWallStatus } from './parser.js'
 import {
 	emptyDeviceState,
 	emptySignalMap,
@@ -15,6 +15,7 @@ import {
 	type DecoderState,
 	type DeviceState,
 	type EncoderState,
+	type WallState,
 } from './types.js'
 
 export interface StateChanges {
@@ -30,10 +31,12 @@ export interface StateChanges {
 	presence: boolean
 	/** Controller-level info changed. */
 	system: boolean
+	/** Video wall state changed. */
+	walls: boolean
 }
 
 export function noChanges(): StateChanges {
-	return { devices: false, roster: false, routing: false, output: false, presence: false, system: false }
+	return { devices: false, roster: false, routing: false, output: false, presence: false, system: false, walls: false }
 }
 
 export function hasAnyChange(changes: StateChanges): boolean {
@@ -88,6 +91,41 @@ export class ChazyState {
 
 	get encoders(): EncoderState[] {
 		return [...this.#state.encoders.values()].sort((a, b) => a.id - b.id)
+	}
+
+	get walls(): WallState[] {
+		return [...this.#state.walls.values()].sort((a, b) => a.id - b.id)
+	}
+
+	getWall(id: number): WallState | undefined {
+		return this.#state.walls.get(id)
+	}
+
+	/** Merge a `GET WALL [n] STATUS` snapshot. */
+	applyWallStatus(parsed: ParsedWallStatus): StateChanges {
+		const changes = noChanges()
+		const existing = this.#state.walls.get(parsed.id)
+
+		if (
+			!existing ||
+			existing.activePreset !== parsed.activePreset ||
+			existing.name !== parsed.name ||
+			existing.columns !== parsed.columns ||
+			existing.rows !== parsed.rows
+		) {
+			this.#state.walls.set(parsed.id, {
+				id: parsed.id,
+				name: parsed.name,
+				columns: parsed.columns,
+				rows: parsed.rows,
+				activePreset: parsed.activePreset,
+				presetNames: parsed.presetNames,
+			})
+			changes.walls = true
+			if (!existing) changes.roster = true
+		}
+
+		return changes
 	}
 
 	getDecoder(id: number): DecoderState | undefined {

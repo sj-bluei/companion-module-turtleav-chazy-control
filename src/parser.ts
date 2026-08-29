@@ -494,6 +494,93 @@ export function parseEncoderStatus(text: string): ParsedEncoderStatus {
 	return result
 }
 
+export interface ParsedWallStatus {
+	id: number
+	name: string
+	columns: number
+	rows: number
+	/** The `CfgSel` column: the preset currently applied. 0 when none. */
+	activePreset: number
+	/** Preset id to name, from the `Cfg / Name` sub-table. */
+	presetNames: Map<number, string>
+	unparsed: string[]
+}
+
+/**
+ * Parse the output of `GET WALL [n] STATUS`.
+ *
+ * Only the summary row and the preset name table are modelled: the summary
+ * carries `CfgSel`, which is the one piece of live state worth surfacing
+ * (which preset is currently applied). The screen layout sub-tables are
+ * configuration and are left to the web GUI.
+ */
+export function parseWallStatus(text: string): ParsedWallStatus | undefined {
+	const result: ParsedWallStatus = {
+		id: 0,
+		name: '',
+		columns: 0,
+		rows: 0,
+		activePreset: 0,
+		presetNames: new Map(),
+		unparsed: [],
+	}
+
+	let section: 'none' | 'summary' | 'presets' = 'none'
+	let found = false
+
+	for (const line of splitLines(text)) {
+		const trimmed = line.trim()
+		if (!trimmed || isDelimiter(line)) continue
+		if (/CHAZY\s+CONTROL/i.test(trimmed)) continue
+		if (/FW Version:/i.test(trimmed)) continue
+
+		const tokens = trimmed.split(/\s+/)
+		const first = tokens[0]?.toUpperCase()
+
+		// Header rows switch section; everything else is a data row.
+		if (first === 'VW' && /CFGSEL/i.test(trimmed)) {
+			section = 'summary'
+			continue
+		}
+		if (first === 'CFG' && /NAME/i.test(trimmed)) {
+			section = 'presets'
+			continue
+		}
+		if (first === 'OUTID' || first === 'CLASS' || first === 'SINGLE') {
+			section = 'none'
+			continue
+		}
+
+		if (section === 'summary') {
+			const match = trimmed.match(/^(\d{1,2})\s+(\d{1,2})\s+(\d{1,2})\s+(\d{1,2})\s*(.*)$/)
+			if (match) {
+				result.id = parseInt(match[1], 10)
+				result.columns = parseInt(match[2], 10)
+				result.rows = parseInt(match[3], 10)
+				result.activePreset = parseInt(match[4], 10)
+				result.name = match[5].trim()
+				found = true
+			} else {
+				result.unparsed.push(line)
+			}
+			section = 'none'
+			continue
+		}
+
+		if (section === 'presets') {
+			const match = trimmed.match(/^(\d{1,2})\s+(.*)$/)
+			if (match) {
+				result.presetNames.set(parseInt(match[1], 10), match[2].trim())
+			} else {
+				result.unparsed.push(line)
+			}
+			continue
+		}
+	}
+
+	return found ? result : undefined
+}
+
 /** True if a line is a command acknowledgement. */
 export function isAck(line: string): boolean {
 	return /^\[(SUCCESS|ERROR)\]/i.test(line.trim())

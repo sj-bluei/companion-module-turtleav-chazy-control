@@ -80,12 +80,24 @@ export interface EncoderState {
 	multicast: boolean
 }
 
+export interface WallState {
+	id: number
+	name: string
+	columns: number
+	rows: number
+	/** Preset currently applied to this wall; 0 when none is reported. */
+	activePreset: number
+	/** Preset id to name, as configured on the unit. */
+	presetNames: Map<number, string>
+}
+
 export interface DeviceState {
 	firmware: string
 	/** Controller front-panel/system power state, as shown by GET STATUS. */
 	power: boolean
 	decoders: Map<number, DecoderState>
 	encoders: Map<number, EncoderState>
+	walls: Map<number, WallState>
 }
 
 export function emptyDeviceState(): DeviceState {
@@ -94,6 +106,7 @@ export function emptyDeviceState(): DeviceState {
 		power: false,
 		decoders: new Map(),
 		encoders: new Map(),
+		walls: new Map(),
 	}
 }
 

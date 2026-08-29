@@ -12,11 +12,33 @@ import type { ActionsSchema } from '../actions.js'
 import type { FeedbacksSchema } from '../feedbacks.js'
 import { UpdateActions } from '../actions.js'
 import { UpdateFeedbacks } from '../feedbacks.js'
+import { UpdatePresets } from '../presets.js'
 import { ChazyState } from '../state.js'
 import { parseDecoderStatus, parseEncoderStatus, parseSystemStatus } from '../parser.js'
 import { ChazySimulator } from './simulator.js'
 import type { DecoderState } from '../types.js'
 import { resolveToggle, type ToggleOption } from '../options.js'
+
+export interface PresetGroup {
+	id: string
+	name: string
+	type: string
+	presets?: string[]
+}
+
+export interface PresetSection {
+	id: string
+	name: string
+	definitions: PresetGroup[] | string[]
+}
+
+export interface PresetDefinition {
+	type: string
+	name: string
+	style: { text?: string }
+	steps: { down: { actionId: string }[]; up: unknown[] }[]
+	feedbacks: { feedbackId: string }[]
+}
 
 type AnyDefinition = {
 	name: string
@@ -33,6 +55,8 @@ export class ActionHarness {
 
 	#actions: Record<string, AnyDefinition> = {}
 	#feedbacks: Record<string, AnyDefinition> = {}
+	#presetSections: unknown[] = []
+	#presets: Record<string, unknown> = {}
 
 	/** Populate state from the simulator's documented-format blocks. */
 	loadSimulatorState(simulator = new ChazySimulator()): void {
@@ -44,6 +68,20 @@ export class ActionHarness {
 	build(): void {
 		UpdateActions(this as unknown as ModuleInstance)
 		UpdateFeedbacks(this as unknown as ModuleInstance)
+		UpdatePresets(this as unknown as ModuleInstance)
+	}
+
+	setPresetDefinitions(sections: unknown[], presets: Record<string, unknown>): void {
+		this.#presetSections = sections
+		this.#presets = presets
+	}
+
+	get presetSections(): PresetSection[] {
+		return this.#presetSections as PresetSection[]
+	}
+
+	get presets(): Record<string, PresetDefinition> {
+		return this.#presets as Record<string, PresetDefinition>
 	}
 
 	// -- surface used by the definitions ------------------------------------

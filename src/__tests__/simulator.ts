@@ -35,6 +35,15 @@ interface SimDecoder {
 	locked: number[]
 }
 
+interface SimWall {
+	id: number
+	name: string
+	columns: number
+	rows: number
+	activePreset: number
+	presets: [number, string][]
+}
+
 interface SimEncoder {
 	id: number
 	name: string
@@ -80,6 +89,9 @@ export class ChazySimulator {
 		{ id: 13, name: 'Stage Camera', online: true, signal: true },
 		{ id: 14, name: 'Playback PC', online: true, signal: false },
 	]
+
+	/** Video walls that exist. Walls not listed here reply with an error. */
+	walls: SimWall[] = [{ id: 1, name: 'VW1', columns: 2, rows: 2, activePreset: 1, presets: [[1, 'TEST1']] }]
 
 	/** Commands received, in order. Useful for asserting wire syntax. */
 	readonly received: string[] = []
@@ -185,8 +197,17 @@ export class ChazySimulator {
 			return ok(`Set decoder ${pad3(match[1])} mode ${mode}.`)
 		}
 
+		match = upper.match(/^GET WALL\s+(\d+)\s+STATUS$/)
+		if (match) return this.wallStatusBlock(parseInt(match[1], 10))
+
 		match = command.match(/^APPLY WALL\s+(\d+)\s+PRESET\s+(\d+)$/i)
-		if (match) return ok(`Apply preset: Preset ${parseInt(match[2], 10)}.`)
+		if (match) {
+			const wallId = parseInt(match[1], 10)
+			const wall = this.walls.find((candidate) => candidate.id === wallId)
+			if (!wall) return err(`Video wall ${wallId} does not exist.`)
+			wall.activePreset = parseInt(match[2], 10)
+			return ok(`Apply preset: Preset ${wall.activePreset}.`)
+		}
 
 		return err('Unknown command.')
 	}
@@ -263,6 +284,29 @@ export class ChazySimulator {
 		return `${lines.join('\r\n')}\r\n`
 	}
 
+	wallStatusBlock(id: number): string {
+		const wall = this.walls.find((candidate) => candidate.id === id)
+		if (!wall) return err(`Video wall ${pad2(id)} does not exist.`)
+
+		const lines = [
+			DELIMITER,
+			'              CHAZY CONTROL Video Wall Info',
+			`              FW Version: ${this.#options.firmware}`,
+			'VW  Col    Row    CfgSel  Name',
+			`${pad2(wall.id)}  ${pad2(wall.columns)}     ${pad2(wall.rows)}     ${pad2(wall.activePreset)}      ${wall.name}`,
+			'OutID',
+			'001 002 --- ---',
+			'Cfg    Name',
+			...wall.presets.map(([preset, name]) => `${pad2(preset)}     ${name}`),
+			'Class  From    Screen',
+			'A      001     H01V02 H02V02',
+			'Single From',
+			'H02V01 001',
+			DELIMITER,
+		]
+		return `${lines.join('\r\n')}\r\n`
+	}
+
 	decoderStatusBlock(id = 0): string {
 		const targets = id === 0 ? this.decoders : this.decoders.filter((decoder) => decoder.id === id)
 		if (targets.length === 0) return err(`Decoder ${pad3(id)} does not exist.`)
@@ -292,6 +336,10 @@ export class ChazySimulator {
 		lines.push(DELIMITER)
 		return `${lines.join('\r\n')}\r\n`
 	}
+}
+
+function pad2(value: number | string): string {
+	return String(value).padStart(2, '0')
 }
 
 function pad3(value: number | string): string {

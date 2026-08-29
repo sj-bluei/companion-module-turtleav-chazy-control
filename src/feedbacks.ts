@@ -19,6 +19,7 @@ export type FeedbacksSchema = {
 	decoder_hpd: { type: 'boolean'; options: { dec: DeviceOption } }
 	decoder_online: { type: 'boolean'; options: { dec: DeviceOption } }
 	encoder_online: { type: 'boolean'; options: { enc: DeviceOption; requireSignal: boolean } }
+	wall_preset_active: { type: 'boolean'; options: { wall: number; preset: number } }
 }
 
 const GREEN = combineRgb(0, 153, 51)
@@ -154,6 +155,22 @@ export function UpdateFeedbacks(self: ModuleInstance): void {
 				const dec = asDeviceId(feedback.options.dec)
 				if (dec === undefined) return false
 				return self.state.getDecoder(dec)?.online ?? false
+			},
+		},
+
+		wall_preset_active: {
+			name: 'Video wall preset is active',
+			description: 'True when the chosen preset is the one currently applied to that video wall.',
+			type: 'boolean',
+			defaultStyle: { bgcolor: GREEN, color: WHITE },
+			options: [
+				{ id: 'wall', type: 'number', label: 'Video wall', min: 1, max: 9, default: 1 },
+				{ id: 'preset', type: 'number', label: 'Preset', min: 1, max: 9, default: 1 },
+			],
+			callback: (feedback) => {
+				const wall = self.state.getWall(Number(feedback.options.wall))
+				if (!wall) return false
+				return wall.activePreset === Number(feedback.options.preset)
 			},
 		},
 

@@ -8,7 +8,7 @@ import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { UpdateVariableDefinitions, UpdateVariableValues, type VariablesSchema } from './variables.js'
 import { UpgradeScripts } from './upgrades.js'
-import { isError, parseDecoderStatus, parseEncoderStatus, parseSystemStatus } from './parser.js'
+import { isError, parseDecoderStatus, parseEncoderStatus, parseSystemStatus, parseWallStatus } from './parser.js'
 import { ChazyState, hasAnyChange, noChanges, type StateChanges } from './state.js'
 import { resolveToggle, type ToggleOption } from './options.js'
 import type { DecoderState } from './types.js'
@@ -33,6 +33,8 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	#pollInFlight = false
 	/** Set once a status block has been parsed successfully. */
 	#everSynced = false
+	/** Video wall IDs that exist, discovered once per connection. */
+	#knownWalls: number[] = []
 
 	async init(config: ModuleConfig): Promise<void> {
 		this.config = { ...CONFIG_DEFAULTS, ...config }
@@ -58,6 +60,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		this.#client = undefined
 		this.state.clear()
 		this.#everSynced = false
+		this.#knownWalls = []
 		this.#connect()
 	}
 
@@ -230,6 +233,9 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				// GET STATUS has no name column.
 				const encoderLines = await client.send(Commands.getEncoderStatus(0), 'block', PRIORITY_POLL)
 				changes = this.#merge(changes, this.state.applyEncoderStatus(parseEncoderStatus(encoderLines.join('\n'))))
+
+				if (initial) await this.#probeWalls()
+				changes = this.#merge(changes, await this.#pollWalls())
 			}
 
 			const decoderLines = await client.send(Commands.getDecoderStatus(0), 'block', PRIORITY_POLL)
@@ -257,6 +263,49 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
+	/**
+	 * Find which video walls exist, once per connection.
+	 *
+	 * There are up to nine possible walls but most systems configure one or
+	 * none, so they are probed once and only the ones that answer are polled
+	 * afterwards. A wall that does not exist replies with `[ERROR]`.
+	 */
+	async #probeWalls(): Promise<void> {
+		const client = this.#client
+		if (!client) return
+
+		this.#knownWalls = []
+		for (let wall = 1; wall <= 9; wall++) {
+			try {
+				const lines = await client.send(Commands.getWallStatus(wall), 'block', PRIORITY_POLL)
+				const parsed = parseWallStatus(lines.join('\n'))
+				if (parsed) {
+					this.#knownWalls.push(wall)
+					this.state.applyWallStatus(parsed)
+				}
+			} catch {
+				// A wall that cannot be read is simply not polled.
+			}
+		}
+
+		if (this.#knownWalls.length > 0) {
+			this.log('debug', `Video walls configured: ${this.#knownWalls.join(', ')}`)
+		}
+	}
+
+	async #pollWalls(): Promise<StateChanges> {
+		const client = this.#client
+		let changes = noChanges()
+		if (!client || this.#knownWalls.length === 0) return changes
+
+		for (const wall of this.#knownWalls) {
+			const lines = await client.send(Commands.getWallStatus(wall), 'block', PRIORITY_POLL)
+			const parsed = parseWallStatus(lines.join('\n'))
+			if (parsed) changes = this.#merge(changes, this.state.applyWallStatus(parsed))
+		}
+		return changes
+	}
+
 	#merge(a: StateChanges, b: StateChanges): StateChanges {
 		return {
 			devices: a.devices || b.devices,
@@ -265,6 +314,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			output: a.output || b.output,
 			presence: a.presence || b.presence,
 			system: a.system || b.system,
+			walls: a.walls || b.walls,
 		}
 	}
 
@@ -295,5 +345,6 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 		if (changes.output) this.checkFeedbacks('output_on', 'output_muted')
 		if (changes.presence) this.checkFeedbacks('decoder_online', 'encoder_online', 'decoder_hpd')
 		if (changes.devices) this.checkFeedbacks('decoder_mode_vw')
+		if (changes.walls) this.checkFeedbacks('wall_preset_active')
 	}
 }
