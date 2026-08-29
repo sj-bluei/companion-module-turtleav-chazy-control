@@ -124,6 +124,51 @@ describe('ChazyClient against a simulated device', () => {
 	})
 })
 
+describe('ChazyClient against a device that emits a prompt', () => {
+	let simulator: ChazySimulator
+	let client: ChazyClient
+	let port: number
+
+	before(async () => {
+		// A prompt with no trailing newline stays in the receive buffer, and
+		// would be glued onto the first line of the next reply if not dropped.
+		simulator = new ChazySimulator({ prompt: 'CHAZY> ' })
+		port = await simulator.listen()
+		client = new ChazyClient({ host: '127.0.0.1', port, commandTimeout: 4000 })
+		client.on('error', () => {
+			/* surfaced through the failing assertion instead */
+		})
+		client.connect()
+		await connected(client)
+	})
+
+	after(async () => {
+		client.destroy()
+		await simulator.close()
+	})
+
+	it('settles an ack immediately on the command after a prompt', async () => {
+		await client.send(Commands.getStatus(), 'block')
+
+		const started = Date.now()
+		const lines = await client.send(Commands.routeAll(1, 14), 'ack')
+		const elapsed = Date.now() - started
+
+		assert.ok(
+			lines.some((line) => /^\[SUCCESS]/.test(line.trim())),
+			`expected a clean [SUCCESS] line, got ${JSON.stringify(lines)}`,
+		)
+		// Without dropping the stale prompt this only settles on the idle timer.
+		assert.ok(elapsed < 400, `ack took ${elapsed}ms, suggesting it fell back to the idle timeout`)
+	})
+
+	it('still parses a status block cleanly', async () => {
+		const lines = await client.send(Commands.getDecoderStatus(0), 'block')
+		const parsed = parseDecoderStatus(lines.join('\n'))
+		assert.equal(parsed.decoders.length, 2)
+	})
+})
+
 describe('ChazyClient error handling', () => {
 	it('rejects queued commands when the device disappears', async () => {
 		const simulator = new ChazySimulator()

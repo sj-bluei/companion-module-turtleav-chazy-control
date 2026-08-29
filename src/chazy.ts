@@ -50,6 +50,24 @@ export const PRIORITY_POLL = 10
 
 const DELIMITER = /^={4,}$/
 
+/**
+ * Remove a shell-style prompt that the device left in front of a reply.
+ *
+ * A prompt has no trailing newline, so it sits in the receive buffer until the
+ * next reply arrives and ends up glued to that reply's first line. Only strip
+ * it when what follows is recognisably the start of a reply, so ordinary
+ * status text is never mangled.
+ */
+export function stripPromptPrefix(line: string): string {
+	const ack = line.search(/\[(?:SUCCESS|ERROR)]/i)
+	if (ack > 0) return line.slice(ack)
+
+	const delimiter = line.match(/^[^=]{1,32}?(={4,}\s*)$/)
+	if (delimiter) return delimiter[1]
+
+	return line
+}
+
 export class ChazyClient extends EventEmitter<ChazyClientEvents> {
 	readonly #options: Required<ChazyClientOptions>
 
@@ -174,6 +192,14 @@ export class ChazyClient extends EventEmitter<ChazyClientEvents> {
 			this.#settle(new Error(`Timed out waiting for a reply to "${job.command}"`))
 		}, this.#options.commandTimeout)
 
+		// Discard anything left over from the previous reply. Telnet CLIs often
+		// leave a prompt with no trailing newline sitting in the buffer, which
+		// would otherwise be glued onto the front of this command's first line.
+		if (this.#receiveBuffer) {
+			if (this.#receiveBuffer.trim()) this.emit('line', this.#receiveBuffer)
+			this.#receiveBuffer = ''
+		}
+
 		try {
 			this.#socket?.send(`${job.command}\r\n`)
 		} catch (error) {
@@ -200,7 +226,7 @@ export class ChazyClient extends EventEmitter<ChazyClientEvents> {
 	}
 
 	#onLine(rawLine: string): void {
-		const line = rawLine.replace(/\s+$/, '')
+		const line = stripPromptPrefix(rawLine.replace(/\s+$/, ''))
 		this.emit('line', line)
 
 		const job = this.#active

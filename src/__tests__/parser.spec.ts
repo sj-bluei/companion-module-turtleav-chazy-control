@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { parseDecoderStatus, parseSignalOrder, parseSystemStatus } from '../parser.js'
+import { stripPromptPrefix } from '../chazy.js'
 
 /**
  * Fixtures transcribed from the Chazy Control API Reference (sections 2.2 and
@@ -237,5 +238,40 @@ describe('parseSignalOrder', () => {
 	it('does not mistake the trailing Video column for the Vid column', () => {
 		const order = parseSignalOrder('    >>Fix    Vid /Aud /IR  /Ser /USB /CEC   MCast Video Mute')
 		assert.deepEqual(order, ['video', 'audio', 'ir', 'serial', 'usb', 'cec'])
+	})
+})
+
+describe('stripPromptPrefix', () => {
+	it('removes a prompt in front of an acknowledgement', () => {
+		assert.equal(
+			stripPromptPrefix('CHAZY> [SUCCESS]Set decoder 001 from encoder 014.'),
+			'[SUCCESS]Set decoder 001 from encoder 014.',
+		)
+	})
+
+	it('removes a prompt in front of an error', () => {
+		assert.equal(stripPromptPrefix('> [ERROR]Unknown command.'), '[ERROR]Unknown command.')
+	})
+
+	it('removes a prompt in front of a block delimiter', () => {
+		assert.equal(stripPromptPrefix('CHAZY> ================'), '================')
+	})
+
+	it('leaves a clean acknowledgement untouched', () => {
+		assert.equal(stripPromptPrefix('[SUCCESS]Done.'), '[SUCCESS]Done.')
+	})
+
+	it('leaves a clean delimiter untouched', () => {
+		assert.equal(stripPromptPrefix('================'), '================')
+	})
+
+	it('leaves ordinary status rows untouched', () => {
+		const row = '001   Gen 2  On     Off   3.01.17  MX      00    0       Decoder 001'
+		assert.equal(stripPromptPrefix(row), row)
+	})
+
+	it('leaves a table header containing = untouched', () => {
+		const header = 'ID    Type   Net    HPD   Ver      Mode   Res   Rotate  Name'
+		assert.equal(stripPromptPrefix(header), header)
 	})
 })

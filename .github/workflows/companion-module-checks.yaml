@@ -10,9 +10,6 @@ jobs:
     if: ${{ !contains(github.repository, 'companion-module-template-') }}
 
     permissions:
-      # contents: read is needed while this repository is private, so the
-      # reusable workflow can check it out. Harmless once it is public.
-      contents: read
       packages: read
 
     uses: bitfocus/actions/.github/workflows/module-checks.yaml@main

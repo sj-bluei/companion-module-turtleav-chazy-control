@@ -17,6 +17,8 @@ export interface SimulatorOptions {
 	banner?: boolean
 	/** Echo received commands back, as a telnet server with echo on would. */
 	echo?: boolean
+	/** Emit a shell-style prompt with no trailing newline after each reply. */
+	prompt?: string
 	firmware?: string
 }
 
@@ -86,6 +88,7 @@ export class ChazySimulator {
 		this.#options = {
 			banner: options.banner ?? false,
 			echo: options.echo ?? false,
+			prompt: options.prompt ?? '',
 			firmware: options.firmware ?? '1.00.17',
 		}
 
@@ -109,6 +112,7 @@ export class ChazySimulator {
 					this.received.push(command)
 					if (this.#options.echo) socket.write(`${command}\r\n`)
 					socket.write(this.#respond(command))
+					if (this.#options.prompt) socket.write(this.#options.prompt)
 				}
 			})
 		})
