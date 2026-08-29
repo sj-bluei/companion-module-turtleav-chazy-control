@@ -8,7 +8,14 @@ import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { UpdateVariableDefinitions, UpdateVariableValues, type VariablesSchema } from './variables.js'
 import { UpgradeScripts } from './upgrades.js'
-import { isError, parseDecoderStatus, parseEncoderStatus, parseSystemStatus, parseWallStatus } from './parser.js'
+import {
+	isError,
+	parseDanteSearch,
+	parseDecoderStatus,
+	parseEncoderStatus,
+	parseSystemStatus,
+	parseWallStatus,
+} from './parser.js'
 import { ChazyState, hasAnyChange, noChanges, type StateChanges } from './state.js'
 import { resolveToggle, type ToggleOption } from './options.js'
 import type { DecoderState } from './types.js'
@@ -234,7 +241,12 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				const encoderLines = await client.send(Commands.getEncoderStatus(0), 'block', PRIORITY_POLL)
 				changes = this.#merge(changes, this.state.applyEncoderStatus(parseEncoderStatus(encoderLines.join('\n'))))
 
-				if (initial) await this.#probeWalls()
+				if (initial) {
+					changes = this.#merge(changes, await this.#probeWalls())
+					// A Dante search is a network scan, so it runs once on connect
+					// and on demand rather than on every poll.
+					changes = this.#merge(changes, await this.#searchDante())
+				}
 				changes = this.#merge(changes, await this.#pollWalls())
 			}
 
@@ -270,9 +282,10 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 	 * none, so they are probed once and only the ones that answer are polled
 	 * afterwards. A wall that does not exist replies with `[ERROR]`.
 	 */
-	async #probeWalls(): Promise<void> {
+	async #probeWalls(): Promise<StateChanges> {
 		const client = this.#client
-		if (!client) return
+		let changes = noChanges()
+		if (!client) return changes
 
 		this.#knownWalls = []
 		for (let wall = 1; wall <= 9; wall++) {
@@ -281,7 +294,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 				const parsed = parseWallStatus(lines.join('\n'))
 				if (parsed) {
 					this.#knownWalls.push(wall)
-					this.state.applyWallStatus(parsed)
+					changes = this.#merge(changes, this.state.applyWallStatus(parsed))
 				}
 			} catch {
 				// A wall that cannot be read is simply not polled.
@@ -290,6 +303,38 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 
 		if (this.#knownWalls.length > 0) {
 			this.log('debug', `Video walls configured: ${this.#knownWalls.join(', ')}`)
+		}
+		return changes
+	}
+
+	/**
+	 * Rescan the Dante network. Exposed as an action because the search is too
+	 * expensive to run on the normal poll cycle.
+	 */
+	async refreshDante(): Promise<void> {
+		const changes = await this.#searchDante()
+		if (changes.dante) {
+			this.updateActions()
+			UpdateVariableDefinitions(this)
+			UpdateVariableValues(this)
+			this.log('info', `Found ${this.state.danteDevices.length} Dante device(s)`)
+		}
+	}
+
+	async #searchDante(): Promise<StateChanges> {
+		const client = this.#client
+		if (!client) return noChanges()
+
+		try {
+			const lines = await client.send(Commands.danteSearch(), 'block', PRIORITY_POLL)
+			const parsed = parseDanteSearch(lines.join('\n'))
+			if (parsed.unparsed.length > 0 && this.config.verbose) {
+				this.log('debug', `Unrecognised Dante rows: ${parsed.unparsed.slice(0, 5).join(' | ')}`)
+			}
+			return this.state.applyDanteSearch(parsed.devices)
+		} catch (error) {
+			this.log('debug', `Dante search failed: ${error instanceof Error ? error.message : String(error)}`)
+			return noChanges()
 		}
 	}
 
@@ -315,6 +360,7 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			presence: a.presence || b.presence,
 			system: a.system || b.system,
 			walls: a.walls || b.walls,
+			dante: a.dante || b.dante,
 		}
 	}
 
@@ -329,7 +375,11 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			)
 		}
 
-		if (changes.roster) {
+		if (changes.dante) {
+			this.updateActions()
+		}
+
+		if (changes.roster || changes.walls) {
 			// New devices appeared, so dropdowns and generated presets are stale.
 			this.updateActions()
 			this.updateFeedbacks()

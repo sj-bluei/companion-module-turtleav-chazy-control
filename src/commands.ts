@@ -59,6 +59,33 @@ export const Commands = {
 
 	// -- Device lifecycle --------------------------------------------------
 	rebootDevice: (target: 'DEC' | 'ENC', id: DeviceId): string => `SET ${target} ${id} REBOOT`,
+
+	// -- Dante ---------------------------------------------------------------
+	//
+	// Dante devices are addressed by name rather than ID, and those names can
+	// contain spaces (the reference shows "DA 22XLR-WP-EU-V2-2705a7"). The
+	// keywords between the fields are what delimit them; whether the device
+	// tolerates that in every position is a bring-up question.
+	danteSearch: (): string => 'DANTE DEV SEARCH',
+	danteStatus: (device: string): string => `GET DANTE DEV ${device} STATUS`,
+	danteSubscribe: (
+		rxDevice: string,
+		kind: 'AUDIO' | 'VIDEO',
+		rxChannel: number,
+		txDevice: string,
+		txChannel: number,
+	): string => `SET DANTE DEV ${rxDevice} ${kind} RXCHN ${rxChannel} SOURCE ${txDevice} CHN ${txChannel}`,
+	danteSetName: (device: string, name: string): string => `SET DANTE DEV ${device} NAME ${name}`,
+	danteSetSampleRate: (device: string, rate: number): string => `SET DANTE DEV ${device} SRATE ${rate}`,
+	danteSetEncoding: (device: string, encoding: number): string => `SET DANTE DEV ${device} ENC ${encoding}`,
+	danteSetLatency: (device: string, latency: number): string => `SET DANTE DEV ${device} LATENCY ${latency}`,
+	danteChannelName: (
+		device: string,
+		kind: 'AUDIO' | 'VIDEO',
+		direction: 'TXCHN' | 'RXCHN',
+		channel: number,
+		name: string,
+	): string => `SET DANTE DEV ${device} ${kind} ${direction} ${channel} NAME ${name}`,
 } as const
 
 function pad2(value: number): string {

@@ -581,6 +581,129 @@ export function parseWallStatus(text: string): ParsedWallStatus | undefined {
 	return found ? result : undefined
 }
 
+export interface ParsedDanteDevice {
+	index: number
+	ip: string
+	mac: string
+	name: string
+}
+
+/**
+ * Parse the output of `DANTE DEV SEARCH`.
+ *
+ * Names are taken as the remainder of the line because Dante device names
+ * routinely contain spaces — the reference's own sample includes
+ * "DA 22XLR-WP-EU-V2-2705a7".
+ */
+export function parseDanteSearch(text: string): { devices: ParsedDanteDevice[]; unparsed: string[] } {
+	const result: { devices: ParsedDanteDevice[]; unparsed: string[] } = { devices: [], unparsed: [] }
+
+	const row = new RegExp(String.raw`^(\d{1,3})\s+(${IP})\s+((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})\s+(.*)$`)
+	let inTable = false
+
+	for (const line of splitLines(text)) {
+		const trimmed = line.trim()
+		if (!trimmed || isDelimiter(line)) continue
+		if (/Search Dante Result/i.test(trimmed)) continue
+
+		// The listing is introduced by a "==Dante Device" marker.
+		if (/^==/.test(trimmed)) {
+			inTable = true
+			continue
+		}
+		if (/^Index\b/i.test(trimmed)) continue
+
+		const match = line.match(row)
+		if (match) {
+			result.devices.push({
+				index: parseInt(match[1], 10),
+				ip: match[2],
+				mac: match[3].toLowerCase(),
+				name: match[4].trim(),
+			})
+		} else if (inTable) {
+			result.unparsed.push(line)
+		}
+	}
+
+	return result
+}
+
+export interface ParsedDanteStatus {
+	id: number
+	name: string
+	protocolVersion: string
+	deviceVersion: string
+	sampleRate: string
+	encoding: string
+	latency: string
+	unparsed: string[]
+}
+
+/**
+ * Parse the output of `GET DANTE DEV [name] STATUS`.
+ *
+ * Note this reports device configuration only. It does **not** report channel
+ * subscriptions, so there is no documented way to read back what a Dante
+ * receive channel is currently subscribed to, and Dante routing therefore has
+ * no feedback. Worth re-checking against real firmware.
+ */
+export function parseDanteStatus(text: string): ParsedDanteStatus | undefined {
+	const result: ParsedDanteStatus = {
+		id: 0,
+		name: '',
+		protocolVersion: '',
+		deviceVersion: '',
+		sampleRate: '',
+		encoding: '',
+		latency: '',
+		unparsed: [],
+	}
+
+	let pending: 'samplerate' | 'encoding' | 'latency' | 'skip' | undefined
+	let found = false
+
+	for (const line of splitLines(text)) {
+		const trimmed = line.trim()
+		if (!trimmed || isDelimiter(line)) continue
+		if (/Dante Info/i.test(trimmed)) continue
+		if (/FW Version:/i.test(trimmed)) continue
+		if (/^ID\b/i.test(trimmed) && /\bName\b/i.test(trimmed)) continue
+
+		const detail = trimmed.match(/^>>\s*(\w+)/)
+		if (detail) {
+			const kind = detail[1].toLowerCase()
+			if (kind === 'samplerate') pending = 'samplerate'
+			else if (kind === 'encoding') pending = 'encoding'
+			else if (kind === 'latency') pending = 'latency'
+			else pending = 'skip'
+			continue
+		}
+
+		if (pending) {
+			// Value rows are "<current>  <supported...>"; only the first column
+			// is the active setting.
+			const value = trimmed.match(/^(\S+(?:\s\d+)?)/)?.[1] ?? ''
+			if (pending === 'samplerate') result.sampleRate = value
+			else if (pending === 'encoding') result.encoding = value
+			else if (pending === 'latency') result.latency = value
+			pending = undefined
+			continue
+		}
+
+		const summary = trimmed.match(/^(\d{1,3})\s+(\S+)\s+(\S+)\s+(.*)$/)
+		if (summary) {
+			result.id = parseInt(summary[1], 10)
+			result.protocolVersion = summary[2]
+			result.deviceVersion = summary[3]
+			result.name = summary[4].trim()
+			found = true
+		}
+	}
+
+	return found ? result : undefined
+}
+
 /** True if a line is a command acknowledgement. */
 export function isAck(line: string): boolean {
 	return /^\[(SUCCESS|ERROR)\]/i.test(line.trim())

@@ -90,6 +90,12 @@ export class ChazySimulator {
 		{ id: 14, name: 'Playback PC', online: true, signal: false },
 	]
 
+	/** Dante devices reported by a search. Names deliberately contain spaces. */
+	danteDevices: { name: string; ip: string; mac: string }[] = [
+		{ name: 'DA 22XLR-WP-EU-V2-2705a7', ip: '169.254.27.127', mac: '34:d0:b8:27:05:a7' },
+		{ name: 'Decoder -003', ip: '169.254.20.3', mac: '6c:df:fb:09:80:11' },
+	]
+
 	/** Video walls that exist. Walls not listed here reply with an error. */
 	walls: SimWall[] = [{ id: 1, name: 'VW1', columns: 2, rows: 2, activePreset: 1, presets: [[1, 'TEST1']] }]
 
@@ -197,6 +203,16 @@ export class ChazySimulator {
 			return ok(`Set decoder ${pad3(match[1])} mode ${mode}.`)
 		}
 
+		if (upper === 'DANTE DEV SEARCH') return this.danteSearchBlock()
+
+		match = command.match(/^GET DANTE DEV\s+(.+?)\s+STATUS$/i)
+		if (match) return this.danteStatusBlock(match[1].trim())
+
+		match = command.match(/^SET DANTE DEV\s+(.+?)\s+(AUDIO|VIDEO)\s+RXCHN\s+(\d+)\s+SOURCE\s+(.+?)\s+CHN\s+(\d+)$/i)
+		if (match) {
+			return ok(`Set dante ${match[1]} ${match[2].toLowerCase()} rxchn ${match[3]} source ${match[4]} chn ${match[5]}.`)
+		}
+
 		match = upper.match(/^GET WALL\s+(\d+)\s+STATUS$/)
 		if (match) return this.wallStatusBlock(parseInt(match[1], 10))
 
@@ -281,6 +297,46 @@ export class ChazySimulator {
 		}
 
 		lines.push(DELIMITER)
+		return `${lines.join('\r\n')}\r\n`
+	}
+
+	danteSearchBlock(): string {
+		const lines = [
+			DELIMITER,
+			'              Search Dante Result Info',
+			'',
+			'',
+			'==Dante Device',
+			'Index   IP               MAC                Name',
+			...this.danteDevices.map(
+				(device, position) => `${pad3(position + 1)}     ${device.ip.padEnd(16)} ${device.mac}  ${device.name}`,
+			),
+			DELIMITER,
+		]
+		return `${lines.join('\r\n')}\r\n`
+	}
+
+	danteStatusBlock(name: string): string {
+		const device = this.danteDevices.find((candidate) => candidate.name === name)
+		if (!device) return err(`Dante device ${name} does not exist.`)
+
+		const lines = [
+			DELIMITER,
+			'              Controller(DA) Dante Info',
+			`              FW Version: ${this.#options.firmware}`,
+			'',
+			'ID    PVer   DVer     Name',
+			`001   2.0.0  1.0.6.1  ${device.name}`,
+			'    >>SampleRate  Support',
+			'      48000       44100,48000,88200,96000',
+			'    >>Encoding    Support',
+			'      PCM 24      24,16,32',
+			'    >>Latency     Support',
+			'      4000        5000',
+			'    >>IP               GW               SM',
+			`      ${device.ip}  169.254.001.001  255.255.000.000`,
+			DELIMITER,
+		]
 		return `${lines.join('\r\n')}\r\n`
 	}
 

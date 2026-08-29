@@ -7,7 +7,13 @@
  * variables that need it.
  */
 
-import type { ParsedDecoderStatus, ParsedEncoderStatus, ParsedSystemStatus, ParsedWallStatus } from './parser.js'
+import type {
+	ParsedDanteDevice,
+	ParsedDecoderStatus,
+	ParsedEncoderStatus,
+	ParsedSystemStatus,
+	ParsedWallStatus,
+} from './parser.js'
 import {
 	emptyDeviceState,
 	emptySignalMap,
@@ -16,6 +22,7 @@ import {
 	type DeviceState,
 	type EncoderState,
 	type WallState,
+	type DanteDevice,
 } from './types.js'
 
 export interface StateChanges {
@@ -33,10 +40,21 @@ export interface StateChanges {
 	system: boolean
 	/** Video wall state changed. */
 	walls: boolean
+	/** The set of known Dante devices changed. */
+	dante: boolean
 }
 
 export function noChanges(): StateChanges {
-	return { devices: false, roster: false, routing: false, output: false, presence: false, system: false, walls: false }
+	return {
+		devices: false,
+		roster: false,
+		routing: false,
+		output: false,
+		presence: false,
+		system: false,
+		walls: false,
+		dante: false,
+	}
 }
 
 export function hasAnyChange(changes: StateChanges): boolean {
@@ -95,6 +113,46 @@ export class ChazyState {
 
 	get walls(): WallState[] {
 		return [...this.#state.walls.values()].sort((a, b) => a.id - b.id)
+	}
+
+	get danteDevices(): DanteDevice[] {
+		return [...this.#state.dante.values()].sort((a, b) => a.index - b.index)
+	}
+
+	getDanteDevice(name: string): DanteDevice | undefined {
+		return this.#state.dante.get(name)
+	}
+
+	/** Replace the Dante device list from a `DANTE DEV SEARCH` result. */
+	applyDanteSearch(devices: ParsedDanteDevice[]): StateChanges {
+		const changes = noChanges()
+
+		const seen = new Set<string>()
+		for (const device of devices) {
+			seen.add(device.name)
+			const existing = this.#state.dante.get(device.name)
+			if (!existing || existing.ip !== device.ip || existing.index !== device.index) {
+				this.#state.dante.set(device.name, {
+					index: device.index,
+					name: device.name,
+					ip: device.ip,
+					mac: device.mac,
+					sampleRate: existing?.sampleRate,
+					encoding: existing?.encoding,
+					latency: existing?.latency,
+				})
+				changes.dante = true
+			}
+		}
+
+		for (const name of [...this.#state.dante.keys()]) {
+			if (!seen.has(name)) {
+				this.#state.dante.delete(name)
+				changes.dante = true
+			}
+		}
+
+		return changes
 	}
 
 	getWall(id: number): WallState | undefined {

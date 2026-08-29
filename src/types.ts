@@ -91,6 +91,17 @@ export interface WallState {
 	presetNames: Map<number, string>
 }
 
+export interface DanteDevice {
+	index: number
+	name: string
+	ip: string
+	mac: string
+	/** Populated only once the device's own status has been read. */
+	sampleRate?: string
+	encoding?: string
+	latency?: string
+}
+
 export interface DeviceState {
 	firmware: string
 	/** Controller front-panel/system power state, as shown by GET STATUS. */
@@ -98,6 +109,8 @@ export interface DeviceState {
 	decoders: Map<number, DecoderState>
 	encoders: Map<number, EncoderState>
 	walls: Map<number, WallState>
+	/** Dante devices, keyed by name — Dante addresses by name, not ID. */
+	dante: Map<string, DanteDevice>
 }
 
 export function emptyDeviceState(): DeviceState {
@@ -107,6 +120,7 @@ export function emptyDeviceState(): DeviceState {
 		decoders: new Map(),
 		encoders: new Map(),
 		walls: new Map(),
+		dante: new Map(),
 	}
 }
 

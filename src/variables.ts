@@ -54,6 +54,18 @@ export function UpdateVariableDefinitions(self: ModuleInstance): void {
 		definitions[`enc_${id}_signal`] = { name: `Encoder ${id}: input signal present` }
 	}
 
+	definitions['dante_device_count'] = { name: 'Number of Dante devices found' }
+	for (const device of self.state.danteDevices) {
+		const key = String(device.index).padStart(3, '0')
+		definitions[`dante_${key}_name`] = { name: `Dante ${key}: name` }
+		definitions[`dante_${key}_ip`] = { name: `Dante ${key}: IP address` }
+	}
+
+	for (const wall of self.state.walls) {
+		definitions[`wall_${wall.id}_name`] = { name: `Video wall ${wall.id}: name` }
+		definitions[`wall_${wall.id}_preset`] = { name: `Video wall ${wall.id}: active preset` }
+	}
+
 	self.setVariableDefinitions(definitions)
 }
 
@@ -92,6 +104,18 @@ export function UpdateVariableValues(self: ModuleInstance): void {
 		values[`enc_${id}_name`] = encoder.name
 		values[`enc_${id}_online`] = encoder.online ? 'online' : 'offline'
 		values[`enc_${id}_signal`] = encoder.signal ? 'signal' : 'no signal'
+	}
+
+	values['dante_device_count'] = state.danteDevices.length
+	for (const device of state.danteDevices) {
+		const key = String(device.index).padStart(3, '0')
+		values[`dante_${key}_name`] = device.name
+		values[`dante_${key}_ip`] = device.ip
+	}
+
+	for (const wall of state.walls) {
+		values[`wall_${wall.id}_name`] = wall.name
+		values[`wall_${wall.id}_preset`] = wall.activePreset
 	}
 
 	self.setVariableValues(values)

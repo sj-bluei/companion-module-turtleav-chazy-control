@@ -5,7 +5,13 @@ import { InstanceStatus } from '@companion-module/base'
 
 import { ChazyClient } from '../chazy.js'
 import { Commands } from '../commands.js'
-import { parseDecoderStatus, parseSystemStatus, parseWallStatus } from '../parser.js'
+import {
+	parseDanteSearch,
+	parseDanteStatus,
+	parseDecoderStatus,
+	parseSystemStatus,
+	parseWallStatus,
+} from '../parser.js'
 import { ChazyState } from '../state.js'
 import { ChazySimulator } from './simulator.js'
 
@@ -135,6 +141,40 @@ describe('ChazyClient against a simulated device', () => {
 	it('reports an error for a wall that does not exist, so probing can skip it', async () => {
 		const lines = await client.send(Commands.getWallStatus(7), 'block')
 		assert.equal(parseWallStatus(lines.join('\n')), undefined)
+	})
+
+	it('discovers Dante devices, including names containing spaces', async () => {
+		const state = new ChazyState()
+		const lines = await client.send(Commands.danteSearch(), 'block')
+		const parsed = parseDanteSearch(lines.join('\n'))
+		state.applyDanteSearch(parsed.devices)
+
+		assert.equal(state.danteDevices.length, 2)
+		assert.equal(state.danteDevices[0].name, 'DA 22XLR-WP-EU-V2-2705a7')
+	})
+
+	it('round-trips a Dante subscription whose device names contain spaces', async () => {
+		const before = simulator.received.length
+		const lines = await client.send(
+			Commands.danteSubscribe('Decoder -003', 'AUDIO', 2, 'DA 22XLR-WP-EU-V2-2705a7', 1),
+			'ack',
+		)
+
+		assert.equal(
+			simulator.received[before],
+			'SET DANTE DEV Decoder -003 AUDIO RXCHN 2 SOURCE DA 22XLR-WP-EU-V2-2705a7 CHN 1',
+		)
+		// The simulator's parser relies on the keywords to delimit the names;
+		// whether real firmware does the same is a bring-up question.
+		assert.match(lines.join('\n'), /^\[SUCCESS]/)
+	})
+
+	it('reads a Dante device status block', async () => {
+		const lines = await client.send(Commands.danteStatus('Decoder -003'), 'block')
+		const parsed = parseDanteStatus(lines.join('\n'))
+		assert.ok(parsed)
+		assert.equal(parsed.name, 'Decoder -003')
+		assert.equal(parsed.sampleRate, '48000')
 	})
 
 	it('sends the documented wire syntax', async () => {

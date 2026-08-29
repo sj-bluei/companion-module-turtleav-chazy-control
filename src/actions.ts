@@ -46,6 +46,12 @@ export type ActionsSchema = {
 	relay: { options: { target: string; id: DeviceOption; state: string } }
 	reboot_device: { options: { target: string; id: DeviceOption } }
 	reboot_controller: { options: Record<string, never> }
+	dante_subscribe: {
+		options: { rxdev: string; kind: string; rxchn: number; txdev: string; txchn: number }
+	}
+	dante_search: { options: Record<string, never> }
+	dante_set_srate: { options: { device: string; rate: number } }
+	dante_set_latency: { options: { device: string; latency: number } }
 	custom_command: { options: { command: string; expectBlock: boolean } }
 }
 
@@ -75,6 +81,23 @@ export function UpdateActions(self: ModuleInstance): void {
 			allowCustom: true,
 			regex: Regex.NUMBER,
 			tooltip: 'Pick a device, or enter an ID directly to target one that has not been discovered yet.',
+		}) as const
+
+	/**
+	 * Dante devices are addressed by name, not ID, and the names can contain
+	 * spaces. allowCustom lets a name be typed or driven by a variable when the
+	 * device has not been discovered.
+	 */
+	const danteDevices = self.state.danteDevices.map((device) => ({ id: device.name, label: device.name }))
+	const dantePicker = <TKey extends string>(id: TKey, label: string) =>
+		({
+			id,
+			type: 'dropdown' as const,
+			label,
+			choices: danteDevices.length > 0 ? danteDevices : [{ id: '', label: 'No Dante devices found yet' }],
+			default: danteDevices[0]?.id ?? '',
+			allowCustom: true,
+			tooltip: 'Run the "Dante: rescan for devices" action if the list is empty or out of date.',
 		}) as const
 
 	self.setActionDefinitions({
@@ -542,6 +565,94 @@ export function UpdateActions(self: ModuleInstance): void {
 			options: [],
 			callback: async () => {
 				await self.sendCommand(Commands.reboot())
+			},
+		},
+
+		dante_subscribe: {
+			name: 'Dante: subscribe a receive channel to a source',
+			description:
+				'Points one Dante receive channel at a transmit channel. Note the controller does not report existing subscriptions, so this cannot show current state — it is send-only.',
+			options: [
+				dantePicker('rxdev', 'Receiving device'),
+				{
+					id: 'kind',
+					type: 'dropdown',
+					label: 'Channel type',
+					choices: [
+						{ id: 'AUDIO', label: 'Audio' },
+						{ id: 'VIDEO', label: 'Video' },
+					],
+					default: 'AUDIO',
+				},
+				{
+					id: 'rxchn',
+					type: 'number',
+					label: 'Receive channel',
+					min: 1,
+					max: 64,
+					default: 1,
+					tooltip: 'Channel numbering depends on the device; the controller does not report channel counts.',
+				},
+				dantePicker('txdev', 'Source device'),
+				{ id: 'txchn', type: 'number', label: 'Source channel', min: 1, max: 64, default: 1 },
+			],
+			callback: async (event) => {
+				const rxdev = String(event.options.rxdev ?? '').trim()
+				const txdev = String(event.options.txdev ?? '').trim()
+				const kind = event.options.kind
+				if (!rxdev || !txdev || (kind !== 'AUDIO' && kind !== 'VIDEO')) return self.warnBadOption('dante_subscribe')
+
+				await self.sendCommand(
+					Commands.danteSubscribe(rxdev, kind, Number(event.options.rxchn), txdev, Number(event.options.txchn)),
+				)
+			},
+		},
+
+		dante_search: {
+			name: 'Dante: rescan for devices',
+			description: 'Refreshes the list of Dante devices offered in the pickers above.',
+			options: [],
+			callback: async () => {
+				await self.refreshDante()
+			},
+		},
+
+		dante_set_srate: {
+			name: 'Dante: set sample rate',
+			options: [
+				dantePicker('device', 'Dante device'),
+				{
+					id: 'rate',
+					type: 'dropdown',
+					label: 'Sample rate',
+					choices: [44100, 48000, 88200, 96000].map((rate) => ({ id: rate, label: `${rate} Hz` })),
+					default: 48000,
+				},
+			],
+			callback: async (event) => {
+				const device = String(event.options.device ?? '').trim()
+				if (!device) return self.warnBadOption('dante_set_srate')
+				await self.sendCommand(Commands.danteSetSampleRate(device, Number(event.options.rate)))
+			},
+		},
+
+		dante_set_latency: {
+			name: 'Dante: set latency',
+			options: [
+				dantePicker('device', 'Dante device'),
+				{
+					id: 'latency',
+					type: 'number',
+					label: 'Latency (microseconds)',
+					min: 150,
+					max: 20000,
+					default: 4000,
+				},
+			],
+			callback: async (event) => {
+				const device = String(event.options.device ?? '').trim()
+				if (!device) return self.warnBadOption('dante_set_latency')
+				await self.sendCommand(Commands.danteSetLatency(device, Number(event.options.latency)))
 			},
 		},
 

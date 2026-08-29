@@ -11,4 +11,9 @@ First working version. Written against the published Chazy Control API reference
 - 19 actions covering routing, per-signal route locking, decoder output control, video wall preset recall, CEC/IR pass-through, GPIO, relays, reboots, and a raw custom command.
 - 7 boolean feedbacks for routing, route locks, output state, video wall mode and device presence.
 - Variables for controller state plus per-encoder and per-decoder detail.
-- Generated presets: a routing grid per source, output and mute toggles, and video wall preset recall.
+- Salvos: one source to many decoders, and an arbitrary decoder:encoder list that reports bad entries rather than aborting.
+- CEC display control with standard commands (on, standby, volume, mute) and a custom hex escape hatch.
+- Learn support on the routing, output, resolution, rotation and mode actions.
+- Video wall preset feedback, from the `CfgSel` column of `GET WALL STATUS`. Walls are probed once on connect so only the ones that exist are polled.
+- Dante device discovery and audio/video channel subscription. Send-only: the controller does not report existing subscriptions, so Dante routing has no feedback.
+- Generated presets covering every area: routing grid, output/mute/mode toggles, CEC display on/off, per-decoder status tiles, video wall recall, encoder signal indicators and system buttons.

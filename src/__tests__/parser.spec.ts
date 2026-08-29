@@ -2,6 +2,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+	parseDanteSearch,
+	parseDanteStatus,
 	parseDecoderStatus,
 	parseEncoderStatus,
 	parseSignalOrder,
@@ -400,5 +402,100 @@ describe('parseWallStatus', () => {
 
 	it('returns undefined for unrelated output', () => {
 		assert.equal(parseWallStatus(''), undefined)
+	})
+})
+
+/** Transcribed from the API reference sections 5.1 and 5.11. */
+const DANTE_SEARCH = `
+================================================================
+              Search Dante Result Info
+
+
+==Dante Device
+Index   IP               MAC                Name
+001     169.254.27.127   34:d0:b8:27:05:a7  DA 22XLR-WP-EU-V2-2705a7
+002     169.254.20.1     6c:df:fb:00:00:1c  DAV -00001c
+003     169.254.10.1     6c:df:fb:01:1a:85  DAV -011a85
+004     169.254.20.3     6c:df:fb:09:80:11  Decoder -003
+================================================================
+`
+
+const DANTE_STATUS = `
+================================================================
+              Controller(DA) Dante Info
+              FW Version: 1.00.17
+
+ID    PVer   DVer     Name
+001   2.0.0  1.0.6.1  TX1
+    >>SampleRate  Support
+      44100       44100,48000,88200,96000
+    >>Encoding    Support
+      PCM 24      24,16,32
+    >>Latency     Support
+      4000        5000
+    >>Aes67Support  Aes67Enable  Aes67Prefix
+      No            -            -
+    >>IM     MAC
+         Static 6C:DF:FB:07:87:E9
+    >>IP               GW               SM
+      169.254.010.001  169.254.001.001  255.255.000.000
+================================================================
+`
+
+describe('parseDanteSearch', () => {
+	const result = parseDanteSearch(DANTE_SEARCH)
+
+	it('finds every device', () => {
+		assert.equal(result.devices.length, 4)
+	})
+
+	it('keeps names containing spaces intact', () => {
+		assert.equal(result.devices[0].name, 'DA 22XLR-WP-EU-V2-2705a7')
+		assert.equal(result.devices[3].name, 'Decoder -003')
+	})
+
+	it('reads index, IP and MAC', () => {
+		assert.deepEqual(result.devices[0], {
+			index: 1,
+			ip: '169.254.27.127',
+			mac: '34:d0:b8:27:05:a7',
+			name: 'DA 22XLR-WP-EU-V2-2705a7',
+		})
+	})
+
+	it('does not treat the header or marker rows as devices', () => {
+		assert.deepEqual(result.unparsed, [])
+	})
+
+	it('returns nothing for an empty result', () => {
+		assert.deepEqual(parseDanteSearch('').devices, [])
+	})
+})
+
+describe('parseDanteStatus', () => {
+	const result = parseDanteStatus(DANTE_STATUS)
+
+	it('reads the device identity', () => {
+		assert.ok(result)
+		assert.equal(result.id, 1)
+		assert.equal(result.name, 'TX1')
+		assert.equal(result.protocolVersion, '2.0.0')
+		assert.equal(result.deviceVersion, '1.0.6.1')
+	})
+
+	it('reads the active sample rate, not the supported list', () => {
+		assert.equal(result?.sampleRate, '44100')
+	})
+
+	it('reads the active encoding including its width', () => {
+		assert.equal(result?.encoding, 'PCM 24')
+	})
+
+	it('reads the active latency', () => {
+		assert.equal(result?.latency, '4000')
+	})
+
+	it('returns undefined for an error reply', () => {
+		assert.equal(parseDanteStatus('[ERROR]Dante device X does not exist.'), undefined)
 	})
 })
