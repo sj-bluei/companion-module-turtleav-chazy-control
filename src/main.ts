@@ -8,7 +8,7 @@ import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
 import { UpdateVariableDefinitions, UpdateVariableValues, type VariablesSchema } from './variables.js'
 import { UpgradeScripts } from './upgrades.js'
-import { isError, parseDecoderStatus, parseSystemStatus } from './parser.js'
+import { isError, parseDecoderStatus, parseEncoderStatus, parseSystemStatus } from './parser.js'
 import { ChazyState, hasAnyChange, noChanges, type StateChanges } from './state.js'
 import { resolveToggle, type ToggleOption } from './options.js'
 import type { DecoderState } from './types.js'
@@ -225,6 +225,11 @@ export default class ModuleInstance extends InstanceBase<ModuleSchema> {
 			if (wantSystem) {
 				const lines = await client.send(Commands.getStatus(), 'block', PRIORITY_POLL)
 				changes = this.#merge(changes, this.state.applySystemStatus(parseSystemStatus(lines.join('\n'))))
+
+				// Encoder names live only in GET ENC STATUS; the encoder table in
+				// GET STATUS has no name column.
+				const encoderLines = await client.send(Commands.getEncoderStatus(0), 'block', PRIORITY_POLL)
+				changes = this.#merge(changes, this.state.applyEncoderStatus(parseEncoderStatus(encoderLines.join('\n'))))
 			}
 
 			const decoderLines = await client.send(Commands.getDecoderStatus(0), 'block', PRIORITY_POLL)

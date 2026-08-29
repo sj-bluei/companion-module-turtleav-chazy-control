@@ -7,7 +7,7 @@
  * variables that need it.
  */
 
-import type { ParsedDecoderStatus, ParsedSystemStatus } from './parser.js'
+import type { ParsedDecoderStatus, ParsedEncoderStatus, ParsedSystemStatus } from './parser.js'
 import {
 	emptyDeviceState,
 	emptySignalMap,
@@ -69,6 +69,9 @@ function newEncoder(id: number): EncoderState {
 		signal: false,
 		edid: '',
 		ip: '',
+		firmware: '',
+		audioInput: '',
+		multicast: false,
 	}
 }
 
@@ -165,6 +168,59 @@ export class ChazyState {
 			if (row.source !== decoder.selected.video) {
 				decoder.selected.video = row.source
 				changes.routing = true
+				changes.devices = true
+			}
+		}
+
+		return changes
+	}
+
+	/**
+	 * Merge a `GET ENC [n] STATUS` snapshot.
+	 * This is the only source of encoder names.
+	 */
+	applyEncoderStatus(parsed: ParsedEncoderStatus): StateChanges {
+		const changes = noChanges()
+
+		if (parsed.firmware && parsed.firmware !== this.#state.firmware) {
+			this.#state.firmware = parsed.firmware
+			changes.system = true
+		}
+
+		for (const row of parsed.encoders) {
+			let encoder = this.#state.encoders.get(row.id)
+			if (!encoder) {
+				encoder = newEncoder(row.id)
+				this.#state.encoders.set(row.id, encoder)
+				changes.roster = true
+				changes.devices = true
+			}
+
+			if (row.name && encoder.name !== row.name) {
+				encoder.name = row.name
+				changes.roster = true
+				changes.devices = true
+			}
+			if (encoder.online !== row.online || encoder.signal !== row.signal) {
+				encoder.online = row.online
+				encoder.signal = row.signal
+				changes.presence = true
+				changes.devices = true
+			}
+			if (
+				encoder.type !== row.type ||
+				encoder.edid !== row.edid ||
+				encoder.firmware !== row.firmware ||
+				encoder.audioInput !== row.audioInput ||
+				encoder.multicast !== row.multicast ||
+				(row.ip && encoder.ip !== row.ip)
+			) {
+				encoder.type = row.type
+				encoder.edid = row.edid
+				encoder.firmware = row.firmware
+				encoder.audioInput = row.audioInput
+				encoder.multicast = row.multicast
+				if (row.ip) encoder.ip = row.ip
 				changes.devices = true
 			}
 		}

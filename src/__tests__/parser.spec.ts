@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { parseDecoderStatus, parseSignalOrder, parseSystemStatus } from '../parser.js'
+import { parseDecoderStatus, parseEncoderStatus, parseSignalOrder, parseSystemStatus } from '../parser.js'
 import { stripPromptPrefix } from '../chazy.js'
 
 /**
@@ -273,5 +273,75 @@ describe('stripPromptPrefix', () => {
 	it('leaves a table header containing = untouched', () => {
 		const header = 'ID    Type   Net    HPD   Ver      Mode   Res   Rotate  Name'
 		assert.equal(stripPromptPrefix(header), header)
+	})
+})
+
+/** Transcribed from the API reference section 4.32. */
+const ENCODER_STATUS = `
+================================================================
+              CHAZY CONTROL Encoder Info
+              FW Version: 1.00.17
+
+ID    Type   Net    Sig   Ver      EDID   Aud   MCast   Name
+001   Gen 2  On     On    3.00.01  DF000  HDMI  On      Encoder 001
+    >>Fix    Arc
+             000
+    >>Sel    Arc
+             000
+    >>SAC    SGEn/Br/Bit
+      ARC    Off /9 /8n1
+    >>Pin    IOVOL/IODIR/IODAT IRVOL RLY   PHY
+      (1)    12    Out   0     12    Open  Copper
+      (2)    12    Out   0           Open
+    >>IM     MAC
+      Static 6C:DF:FB:07:87:E9
+    >>IP               GW               SM
+      169.254.010.001  169.254.001.001  255.255.000.000
+================================================================
+`
+
+describe('parseEncoderStatus', () => {
+	const result = parseEncoderStatus(ENCODER_STATUS)
+
+	it('reads the encoder name, which GET STATUS does not report', () => {
+		assert.equal(result.encoders.length, 1)
+		assert.equal(result.encoders[0].name, 'Encoder 001')
+	})
+
+	it('reads the summary row', () => {
+		const encoder = result.encoders[0]
+		assert.equal(encoder.id, 1)
+		assert.equal(encoder.type, 'Gen 2')
+		assert.equal(encoder.online, true)
+		assert.equal(encoder.signal, true)
+		assert.equal(encoder.firmware, '3.00.01')
+		assert.equal(encoder.edid, 'DF000')
+		assert.equal(encoder.audioInput, 'HDMI')
+		assert.equal(encoder.multicast, true)
+		assert.equal(encoder.ip, '169.254.010.001')
+	})
+
+	it('ignores detail groups it does not model', () => {
+		assert.deepEqual(result.unparsed, [])
+	})
+
+	it('keeps names containing spaces intact across several encoders', () => {
+		const multi = `
+================================================================
+              CHAZY CONTROL Encoder Info
+              FW Version: 1.00.17
+
+ID    Type   Net    Sig   Ver      EDID   Aud   MCast   Name
+013   Gen 2  On     On    3.00.01  DF000  HDMI  On      Stage Camera
+014   Gen 2  On     Off   3.00.01  DF000  ANA   Off     Playback PC
+================================================================
+`
+		const parsed = parseEncoderStatus(multi)
+		assert.equal(parsed.encoders.length, 2)
+		assert.equal(parsed.encoders[0].name, 'Stage Camera')
+		assert.equal(parsed.encoders[1].name, 'Playback PC')
+		assert.equal(parsed.encoders[1].signal, false)
+		assert.equal(parsed.encoders[1].audioInput, 'ANA')
+		assert.equal(parsed.encoders[1].multicast, false)
 	})
 })

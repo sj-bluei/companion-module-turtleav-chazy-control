@@ -74,6 +74,10 @@ export interface EncoderState {
 	/** EDID code as reported. */
 	edid: string
 	ip: string
+	firmware: string
+	/** Audio input source as reported, e.g. "HDMI" or "ANA". */
+	audioInput: string
+	multicast: boolean
 }
 
 export interface DeviceState {

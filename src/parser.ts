@@ -9,7 +9,7 @@
  * can log it instead of silently losing state.
  */
 
-import { SIGNAL_TYPES, emptySignalMap, type EncoderState, type SignalMap, type SignalType } from './types.js'
+import { SIGNAL_TYPES, emptySignalMap, type SignalMap, type SignalType } from './types.js'
 
 /** A line of `=` characters delimits the start and end of a status block. */
 const DELIMITER = /^={4,}$/
@@ -74,8 +74,17 @@ function parseSignalRow(line: string, order: SignalType[]): { map: SignalMap; fl
 	return { map, flags }
 }
 
-export interface ParsedEncoderRow extends Omit<EncoderState, 'name'> {
-	name?: string
+/**
+ * An encoder row from the `GET STATUS` table.
+ * Note there is no name column here — names come from `GET ENC ... STATUS`.
+ */
+export interface ParsedEncoderRow {
+	id: number
+	type: string
+	edid: string
+	ip: string
+	online: boolean
+	signal: boolean
 }
 
 export interface ParsedDecoderSummary {
@@ -366,6 +375,117 @@ export function parseDecoderStatus(text: string): ParsedDecoderStatus {
 		// Rows we do not model (SAC, Pin, IM, ...) land here; keep them for debug
 		// logging but do not treat them as an error.
 		if (!/^\(?\d\)?\s/.test(trimmed) && !/^(Static|DHCP|AUTOIP)\b/i.test(trimmed)) {
+			result.unparsed.push(line)
+		}
+	}
+
+	flush()
+	return result
+}
+
+export interface ParsedEncoderDetail {
+	id: number
+	name: string
+	type: string
+	online: boolean
+	signal: boolean
+	firmware: string
+	edid: string
+	audioInput: string
+	multicast: boolean
+	ip: string
+}
+
+export interface ParsedEncoderStatus {
+	firmware: string
+	encoders: ParsedEncoderDetail[]
+	unparsed: string[]
+}
+
+/**
+ * Parse the output of `GET ENC [n] STATUS`.
+ *
+ * This is the only place the controller reports encoder names — the encoder
+ * table in `GET STATUS` has no name column — so it is worth polling even
+ * though the rest of the detail changes rarely.
+ */
+export function parseEncoderStatus(text: string): ParsedEncoderStatus {
+	const result: ParsedEncoderStatus = { firmware: '', encoders: [], unparsed: [] }
+
+	const summaryRow = new RegExp(
+		String.raw`^(\d{1,3})\s+(.+?)\s+(On|Off)\s+(On|Off)\s+(\S+)\s+(\S+)\s+(\S+)\s+(On|Off)\s*(.*)$`,
+		'i',
+	)
+
+	let current: ParsedEncoderDetail | undefined
+	let pending: 'ip' | 'skip' | undefined
+
+	const flush = () => {
+		if (current) result.encoders.push(current)
+		current = undefined
+		pending = undefined
+	}
+
+	for (const line of splitLines(text)) {
+		const trimmed = line.trim()
+		if (!trimmed) continue
+
+		if (isDelimiter(line)) {
+			flush()
+			continue
+		}
+
+		if (/CHAZY\s+CONTROL/i.test(trimmed)) continue
+
+		const firmware = trimmed.match(/FW Version:\s*(\S+)/i)
+		if (firmware) {
+			result.firmware = firmware[1]
+			continue
+		}
+
+		if (/^ID\b/i.test(trimmed) && /\bName\b/i.test(trimmed)) {
+			flush()
+			continue
+		}
+
+		const detail = trimmed.match(/^>>\s*(\w+)/)
+		if (detail) {
+			pending = detail[1].toLowerCase() === 'ip' ? 'ip' : 'skip'
+			continue
+		}
+
+		if (current && pending === 'ip') {
+			const ip = trimmed.match(new RegExp(IP))
+			if (ip) current.ip = ip[0]
+			pending = undefined
+			continue
+		}
+
+		if (current && pending === 'skip') {
+			pending = undefined
+			continue
+		}
+
+		const match = line.match(summaryRow)
+		if (match) {
+			flush()
+			current = {
+				id: parseInt(match[1], 10),
+				type: match[2].trim(),
+				online: onOff(match[3]),
+				signal: onOff(match[4]),
+				firmware: match[5].trim(),
+				edid: match[6].trim(),
+				audioInput: match[7].trim(),
+				multicast: onOff(match[8]),
+				name: match[9].trim(),
+				ip: '',
+			}
+			pending = undefined
+			continue
+		}
+
+		if (!/^\(?\d\)?\s/.test(trimmed) && !/^(Static|DHCP|AUTOIP|ARC)\b/i.test(trimmed)) {
 			result.unparsed.push(line)
 		}
 	}

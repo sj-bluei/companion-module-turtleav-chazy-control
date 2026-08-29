@@ -140,6 +140,11 @@ export class ChazySimulator {
 			const id = match ? parseInt(match[1], 10) : 0
 			return this.decoderStatusBlock(id)
 		}
+		if (/^GET ENC(\s+\d+)?\s+STATUS$/.test(upper)) {
+			const match = upper.match(/^GET ENC\s+(\d+)\s+STATUS$/)
+			const id = match ? parseInt(match[1], 10) : 0
+			return this.encoderStatusBlock(id)
+		}
 
 		let match = command.match(/^SET DEC\s+(\d+)\s+SWITCH\s+(\d+)\s+ALL$/i)
 		if (match) {
@@ -226,6 +231,35 @@ export class ChazySimulator {
 			'controller.local',
 			DELIMITER,
 		]
+		return `${lines.join('\r\n')}\r\n`
+	}
+
+	encoderStatusBlock(id = 0): string {
+		const targets = id === 0 ? this.encoders : this.encoders.filter((encoder) => encoder.id === id)
+		if (targets.length === 0) return err(`Encoder ${pad3(id)} does not exist.`)
+
+		const lines = [
+			DELIMITER,
+			'              CHAZY CONTROL Encoder Info',
+			`              FW Version: ${this.#options.firmware}`,
+			'',
+			'ID    Type   Net    Sig   Ver      EDID   Aud   MCast   Name',
+		]
+
+		for (const encoder of targets) {
+			lines.push(
+				`${pad3(encoder.id)}   Gen 2  ${encoder.online ? 'On ' : 'Off'}    ${encoder.signal ? 'On ' : 'Off'}   ` +
+					`3.00.01  DF000  HDMI  On      ${encoder.name}`,
+				'    >>Fix    Arc',
+				'             000',
+				'    >>Sel    Arc',
+				'             000',
+				'    >>IP               GW               SM',
+				`      169.254.010.${pad3(encoder.id)}  169.254.001.001  255.255.000.000`,
+			)
+		}
+
+		lines.push(DELIMITER)
 		return `${lines.join('\r\n')}\r\n`
 	}
 
